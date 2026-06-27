@@ -6,7 +6,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
+import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
+import com.example.scanapp.data.DocumentEntity
+import com.example.scanapp.data.DocumentRepository
 import com.example.scanapp.export.ExportEngine
 import com.example.scanapp.export.ExportOptions
 import com.example.scanapp.export.OutputFormat
@@ -20,6 +23,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private enum class Screen { HOME, SCAN_EXPORT }
 
@@ -27,6 +33,7 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var scannerLauncher: DocumentScannerLauncher
     private val exportEngine by lazy { ExportEngine(applicationContext) }
+    private val repository by lazy { DocumentRepository(applicationContext) }
 
     // Mutable state Compose observes
     private var currentScreen by mutableStateOf(Screen.HOME)
@@ -40,19 +47,18 @@ class MainActivity : ComponentActivity() {
 
         scannerLauncher = DocumentScannerLauncher(
             activity = this,
-            onResult = { uris ->
-                scannedPages = scannedPages + uris
-                currentScreen = Screen.SCAN_EXPORT
-            },
+            onResult = { uris -> onScanCompleted(uris) },
             onError = { e -> exportResultText = "Scan failed: ${e.message}" }
         )
+
+        observeLibrary()
 
         setContent {
             when (currentScreen) {
                 Screen.HOME -> HomeScreen(
                     recentDocuments = recentDocuments,
                     onScanClick = { scannerLauncher.launch() },
-                    onDocumentClick = { /* open saved doc — not yet implemented */ }
+                    onDocumentClick = { doc -> openExistingDocument(doc) }
                 )
                 Screen.SCAN_EXPORT -> ScanScreen(
                     scannedPages = scannedPages,
@@ -63,6 +69,52 @@ class MainActivity : ComponentActivity() {
                     onBackClick = { currentScreen = Screen.HOME }
                 )
             }
+        }
+    }
+
+    /** Keeps recentDocuments in sync with the database, including thumbnails. */
+    private fun observeLibrary() {
+        lifecycleScope.launch {
+            repository.observeAllDocuments().collect { documents ->
+                recentDocuments = documents.map { doc -> toRecentDocument(doc) }
+            }
+        }
+    }
+
+    private suspend fun toRecentDocument(doc: DocumentEntity): RecentDocument {
+        val pageCount = repository.getPageCount(doc.id)
+        val thumbPath = repository.getFirstPagePath(doc.id)
+        val dateFormat = SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault())
+        return RecentDocument(
+            id = doc.id.toString(),
+            title = doc.title,
+            subtitle = "Modified: ${dateFormat.format(Date(doc.modifiedAtMillis))} · $pageCount page" +
+                if (pageCount == 1) "" else "s",
+            thumbnailUri = thumbPath?.let { File(it).toUri() },
+            pageCount = pageCount
+        )
+    }
+
+    /** New scan finished: persist it to the library immediately, then open it for export. */
+    private fun onScanCompleted(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        lifecycleScope.launch {
+            val title = "Scan ${SimpleDateFormat("MM-dd-yyyy HH.mm", Locale.getDefault()).format(Date())}"
+            repository.saveNewDocument(uris, title)
+            // Keep using the original scanner URIs for this export session — they're
+            // still valid cache files at this point and avoids an extra disk read.
+            scannedPages = uris
+            currentScreen = Screen.SCAN_EXPORT
+        }
+    }
+
+    private fun openExistingDocument(doc: RecentDocument) {
+        val documentId = doc.id.toLongOrNull() ?: return
+        lifecycleScope.launch {
+            repository.touchAccessed(documentId)
+            val withPages = repository.getDocumentWithPages(documentId) ?: return@launch
+            scannedPages = withPages.pages.map { File(it.filePath).toUri() }
+            currentScreen = Screen.SCAN_EXPORT
         }
     }
 
