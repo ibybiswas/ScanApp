@@ -1,11 +1,13 @@
 package com.example.scanapp
 
+import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
+import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import com.example.scanapp.data.DocumentEntity
@@ -58,7 +60,10 @@ class MainActivity : ComponentActivity() {
                 Screen.HOME -> HomeScreen(
                     recentDocuments = recentDocuments,
                     onScanClick = { scannerLauncher.launch() },
-                    onDocumentClick = { doc -> openExistingDocument(doc) }
+                    onDocumentClick = { doc -> openExistingDocument(doc) },
+                    onRename = { doc, newTitle -> renameDocument(doc, newTitle) },
+                    onDelete = { doc -> deleteDocument(doc) },
+                    onShare = { doc, format -> shareDocument(doc, format) }
                 )
                 Screen.SCAN_EXPORT -> ScanScreen(
                     scannedPages = scannedPages,
@@ -115,6 +120,94 @@ class MainActivity : ComponentActivity() {
             val withPages = repository.getDocumentWithPages(documentId) ?: return@launch
             scannedPages = withPages.pages.map { File(it.filePath).toUri() }
             currentScreen = Screen.SCAN_EXPORT
+        }
+    }
+
+    private fun renameDocument(doc: RecentDocument, newTitle: String) {
+        val documentId = doc.id.toLongOrNull() ?: return
+        lifecycleScope.launch {
+            repository.renameDocument(documentId, newTitle)
+            // observeLibrary's Flow picks up the change automatically; no manual refresh needed.
+        }
+    }
+
+    private fun deleteDocument(doc: RecentDocument) {
+        val documentId = doc.id.toLongOrNull() ?: return
+        lifecycleScope.launch {
+            repository.deleteDocument(documentId)
+        }
+    }
+
+    /**
+     * Builds the requested format at full quality (no size limit — sharing is
+     * "send as-is", distinct from the size-constrained Export flow) into the
+     * app's cache, then hands it to the Android share sheet via FileProvider.
+     */
+    private fun shareDocument(doc: RecentDocument, format: OutputFormat) {
+        val documentId = doc.id.toLongOrNull() ?: return
+        lifecycleScope.launch {
+            val withPages = repository.getDocumentWithPages(documentId) ?: return@launch
+            val pageUris = withPages.pages.map { File(it.filePath).toUri() }
+            if (pageUris.isEmpty()) return@launch
+
+            val shareDir = File(cacheDir, "share_scratch").apply { mkdirs() }
+            val safeName = doc.title.replace(Regex("[^A-Za-z0-9 _-]"), "_").ifBlank { "scan" }
+
+            when (format) {
+                OutputFormat.PDF -> {
+                    val outFile = File(shareDir, "$safeName.pdf")
+                    withContext(Dispatchers.IO) {
+                        exportEngine.exportAsPdf(
+                            pageUris = pageUris,
+                            targetSizeBytes = null, // full quality for sharing
+                            outputFile = outFile
+                        )
+                    }
+                    val shareUri = FileProvider.getUriForFile(
+                        this@MainActivity, "com.example.scanapp.fileprovider", outFile
+                    )
+                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/pdf"
+                        putExtra(Intent.EXTRA_STREAM, shareUri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(Intent.createChooser(sendIntent, "Share document"))
+                }
+                OutputFormat.JPEG, OutputFormat.PNG -> {
+                    // Share ALL pages, not just the first — multi-page documents
+                    // shouldn't silently lose pages when shared as images.
+                    val shareUris = withContext(Dispatchers.IO) {
+                        pageUris.mapIndexedNotNull { index, uri ->
+                            val bitmap = contentResolver.openInputStream(uri)?.use {
+                                BitmapFactory.decodeStream(it)
+                            } ?: return@mapIndexedNotNull null
+                            val outFile = File(shareDir, "${safeName}_page${index + 1}.jpg")
+                            outFile.outputStream().use { out ->
+                                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, out)
+                            }
+                            FileProvider.getUriForFile(
+                                this@MainActivity, "com.example.scanapp.fileprovider", outFile
+                            )
+                        }
+                    }
+                    if (shareUris.isEmpty()) return@launch
+
+                    val sendIntent = if (shareUris.size == 1) {
+                        Intent(Intent.ACTION_SEND).apply {
+                            type = "image/jpeg"
+                            putExtra(Intent.EXTRA_STREAM, shareUris.first())
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                    } else {
+                        Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                            type = "image/jpeg"
+                            putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(shareUris))
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                    }
+                    startActivity(Intent.createChooser(sendIntent, "Share document"))
+                }
+            }
         }
     }
 
