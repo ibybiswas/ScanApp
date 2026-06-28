@@ -16,16 +16,19 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
  * manual crop adjustment, multi-page support, and basic filters (auto/photo/mono).
  * We just register a launcher and hand back the result.
  *
- * @param pageLimit max pages in one scan session. Use a high limit (e.g. 20) for
- *   "scan a new document"; use 1 for "re-scan this single existing page" (the
- *   page-editor's Re-scan action), since GmsDocumentScannerOptions is immutable
- *   once built and each distinct page limit needs its own scanner client.
+ * @param pageLimit max pages in one scan session. Use a high limit (e.g. 100) for
+ *   "scan a new document" — ML Kit's scanner UI already supports continuous batch
+ *   capture (auto-capture, thumbnail strip, keep-scanning-or-finish), so this just
+ *   raises the ceiling rather than building a custom flow; use 1 for "re-scan this
+ *   single existing page" (the page-editor's Re-scan action), since
+ *   GmsDocumentScannerOptions is immutable once built and each distinct page limit
+ *   needs its own scanner client.
  */
 class DocumentScannerLauncher(
     private val activity: ComponentActivity,
     private val onResult: (List<Uri>) -> Unit,
     private val onError: (Exception) -> Unit,
-    pageLimit: Int = 20
+    pageLimit: Int = 100
 ) {
 
     private val scannerOptions = GmsDocumentScannerOptions.Builder()
