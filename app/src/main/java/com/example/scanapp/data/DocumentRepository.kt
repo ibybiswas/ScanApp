@@ -23,6 +23,35 @@ class DocumentRepository(private val context: Context) {
     fun observeSearchResults(query: String): Flow<List<DocumentEntity>> =
         dao.observeSearchResults(query)
 
+    /**
+     * Single entry point for the Home/Files list: combines search + sort.
+     * Page-count sort isn't expressible as a simple Room query without a join
+     * against document_pages, and the document list is small, so it's handled
+     * here by sorting NAME/DATE_MODIFIED results that ties don't actually need —
+     * NAME/DATE go straight to SQL for correct collation/locale behavior, and the
+     * caller (ViewModel/Activity) annotates page counts and re-sorts only when
+     * PAGE_COUNT is selected.
+     */
+    fun observeDocuments(
+        query: String,
+        sortBy: DocumentSortBy,
+        direction: SortDirection
+    ): Flow<List<DocumentEntity>> {
+        val hasQuery = query.isNotBlank()
+        return when (sortBy) {
+            DocumentSortBy.NAME -> if (direction == SortDirection.ASCENDING) {
+                if (hasQuery) dao.observeSearchResultsByNameAsc(query) else dao.observeAllDocumentsByNameAsc()
+            } else {
+                if (hasQuery) dao.observeSearchResultsByNameDesc(query) else dao.observeAllDocumentsByNameDesc()
+            }
+            DocumentSortBy.DATE_MODIFIED, DocumentSortBy.PAGE_COUNT -> if (direction == SortDirection.ASCENDING) {
+                if (hasQuery) dao.observeSearchResultsByDateAsc(query) else dao.observeAllDocumentsByDateAsc()
+            } else {
+                if (hasQuery) dao.observeSearchResultsByDateDesc(query) else dao.observeAllDocumentsByDateDesc()
+            }
+        }
+    }
+
     suspend fun getFirstPagePath(documentId: Long): String? =
         dao.getFirstPage(documentId)?.filePath
 
