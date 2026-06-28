@@ -41,12 +41,6 @@ data class DetailPage(
     val uri: Uri
 )
 
-/**
- * @param onReorder fires ONCE per drag gesture (on release), not per intermediate
- *   swap, with the full new page-ID order — see the draggableHandle's
- *   onDragStopped below. This keeps the DB write count proportional to the
- *   number of drags the user performs, not the number of frames they drag through.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DocumentDetailScreen(
@@ -68,8 +62,6 @@ fun DocumentDetailScreen(
     var showShareSheet by remember { mutableStateOf(false) }
     var deletePageTarget by remember { mutableStateOf<DetailPage?>(null) }
 
-    // Local mutable copy so dragging feels instant; the actual DB write is
-    // triggered only from onDragStopped below, not on every intermediate swap.
     var orderedPages by remember(pages) { mutableStateOf(pages) }
 
     val gridState = rememberLazyGridState()
@@ -77,6 +69,7 @@ fun DocumentDetailScreen(
         orderedPages = orderedPages.toMutableList().apply {
             add(to.index, removeAt(from.index))
         }
+        onReorder(orderedPages.map { it.pageId })
     }
 
     Scaffold(
@@ -140,12 +133,7 @@ fun DocumentDetailScreen(
                         elevation = elevation,
                         onClick = { onPageClick(page) },
                         onDeleteClick = { deletePageTarget = page },
-                        // Long-press the drag handle to start reordering; releasing
-                        // commits the CURRENT orderedPages snapshot to the DB exactly
-                        // once, regardless of how many intermediate swaps happened.
-                        dragHandleModifier = Modifier.longPressDraggableHandle(
-                            onDragStopped = { onReorder(orderedPages.map { it.pageId }) }
-                        )
+                        dragHandleModifier = Modifier.longPressDraggableHandle()
                     )
                 }
             }
@@ -250,9 +238,6 @@ private fun ReorderableCollectionItemScope.PageThumbnail(
             }
         }
 
-        // Drag handle: long-press anywhere on this icon to pick up the page for
-        // reordering. Kept separate from onClick (tap = edit) so the two
-        // gestures don't fight each other.
         Surface(
             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
             shape = RoundedCornerShape(4.dp),

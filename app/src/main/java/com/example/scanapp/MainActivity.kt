@@ -94,7 +94,10 @@ class MainActivity : ComponentActivity() {
                     onDocumentClick = { doc -> openDocumentDetail(doc) },
                     onRename = { doc, newTitle -> renameDocument(doc, newTitle) },
                     onDelete = { doc -> deleteDocument(doc) },
-                    onShare = { doc, format -> shareDocument(doc.id, doc.title, format) }
+                    onShare = { doc, format ->
+    val documentId = doc.id.toLongOrNull() ?: return@HomeScreen
+    shareDocument(documentId, doc.title, format)
+                    }
                 )
                 Screen.DETAIL -> {
                     val documentId = openDocumentId
@@ -383,7 +386,13 @@ class MainActivity : ComponentActivity() {
                 val resultText = withContext(Dispatchers.IO) {
                     when (uiState.format) {
                         OutputFormat.PDF -> {
-                            val scratchFile = File(scratchDir, "scan_${System.currentTimeMillis()}.pdf")
+                            // Use custom filename if provided, otherwise random
+                            val baseFileName = if (uiState.fileName.isNotBlank()) {
+                                uiState.fileName.replace(Regex("[^A-Za-z0-9_-]"), "_")
+                            } else {
+                                "scan_${System.currentTimeMillis()}"
+                            }
+                            val scratchFile = File(scratchDir, "$baseFileName.pdf")
                             val result = exportEngine.exportAsPdf(
                                 pageUris = scannedPages,
                                 targetSizeBytes = targetBytes,
@@ -417,7 +426,13 @@ class MainActivity : ComponentActivity() {
                                     )
                                 )
                                 val bytes = out.toByteArray()
-                                val displayName = "page_${index + 1}_${System.currentTimeMillis()}.$ext"
+                                // Use custom filename if provided, otherwise random
+                                val baseName = if (uiState.fileName.isNotBlank()) {
+                                    uiState.fileName.replace(Regex("[^A-Za-z0-9_-]"), "_")
+                                } else {
+                                    "page_${index + 1}_${System.currentTimeMillis()}"
+                                }
+                                val displayName = "${baseName}_page${index + 1}.$ext"
                                 PublicDocumentSaver.saveToDocuments(
                                     context = applicationContext,
                                     bytes = bytes,
