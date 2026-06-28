@@ -61,7 +61,8 @@ fun HomeScreen(
     onSearchQueryChange: (String) -> Unit = {},
     sortBy: DocumentSortBy = DocumentSortBy.DATE_MODIFIED,
     sortDirection: SortDirection = SortDirection.DESCENDING,
-    onSortChange: (DocumentSortBy, SortDirection) -> Unit = { _, _ -> }
+    onSortChange: (DocumentSortBy, SortDirection) -> Unit = { _, _ -> },
+    onMeClick: () -> Unit = {}
 ) {
     var actionSheetTarget by remember { mutableStateOf<RecentDocument?>(null) }
     var renameTarget by remember { mutableStateOf<RecentDocument?>(null) }
@@ -118,7 +119,7 @@ fun HomeScreen(
                 )
             }
         },
-        bottomBar = { ScanAppBottomNav() },
+        bottomBar = { ScanAppBottomNav(onMeClick = onMeClick) },
         floatingActionButton = {
             if (!selectionMode) {
                 FloatingActionButton(onClick = onScanClick) {
@@ -436,7 +437,7 @@ private fun EmptyRecentsState(modifier: Modifier = Modifier, isSearching: Boolea
 }
 
 @Composable
-private fun ScanAppBottomNav() {
+private fun ScanAppBottomNav(onMeClick: () -> Unit = {}) {
     var selected by remember { mutableStateOf(0) }
     val items = listOf(
         Triple("Home", Icons.Filled.Home, 0),
@@ -448,7 +449,12 @@ private fun ScanAppBottomNav() {
         items.forEach { (label, icon, index) ->
             NavigationBarItem(
                 selected = selected == index,
-                onClick = { selected = index },
+                onClick = {
+                    selected = index
+                    // Home/Files/Tools remain visual-only placeholders for now;
+                    // only "Me" routes to a real screen (the new Settings screen).
+                    if (index == 3) onMeClick()
+                },
                 icon = { Icon(icon, contentDescription = label) },
                 label = { Text(label) }
             )

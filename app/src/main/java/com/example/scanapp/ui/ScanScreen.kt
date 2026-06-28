@@ -27,7 +27,7 @@ enum class SizeUnit { KB, MB }
  */
 data class ExportUiState(
     val format: OutputFormat = OutputFormat.PDF,
-    val sizeLimitBytes: Long? = 2L * 1024 * 1024, // default 2MB cap
+    val sizeLimitBytes: Long? = 500L * 1024, // default 500KB cap (KB is now the default unit)
     val quality: Int = 90,
     val fileName: String = ""
 )
@@ -44,10 +44,10 @@ fun ScanScreen(
 ) {
     var uiState by remember { mutableStateOf(ExportUiState()) }
     var useSizeLimit by remember { mutableStateOf(true) }
-    var sizeUnit by remember { mutableStateOf(SizeUnit.MB) }
+    var sizeUnit by remember { mutableStateOf(SizeUnit.KB) }
     // What's actually typed in the box, kept as text so partial/invalid entry
     // (like "" or "1.") doesn't get force-corrected while the user is mid-edit.
-    var sizeText by remember { mutableStateOf("2") }
+    var sizeText by remember { mutableStateOf("500") }
 
     fun applySizeText(text: String, unit: SizeUnit) {
         sizeText = text
