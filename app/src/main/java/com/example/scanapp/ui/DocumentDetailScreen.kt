@@ -90,11 +90,6 @@ fun DocumentDetailScreen(
                     }
                     DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                         DropdownMenuItem(
-                            text = { Text("Export (set size/format)") },
-                            leadingIcon = { Icon(Icons.Filled.FileDownload, contentDescription = null) },
-                            onClick = { showMenu = false; onExportClick() }
-                        )
-                        DropdownMenuItem(
                             text = { Text("Rename") },
                             leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
                             onClick = { showMenu = false; showRenameDialog = true }
@@ -108,12 +103,25 @@ fun DocumentDetailScreen(
                 }
             )
         },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(onClick = onAddPagesClick) {
-                Icon(Icons.Filled.Add, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Add pages")
-            }
+        bottomBar = {
+            BottomAppBar(
+                actions = {
+                    TextButton(onClick = onAddPagesClick) {
+                        Icon(Icons.Filled.Add, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Add pages")
+                    }
+                },
+                floatingActionButton = {
+                    // Export pinned to the bottom-right corner, per request, since
+                    // it's the most frequently needed action on this screen.
+                    ExtendedFloatingActionButton(onClick = onExportClick) {
+                        Icon(Icons.Filled.FileDownload, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Export")
+                    }
+                }
+            )
         }
     ) { padding ->
         LazyVerticalGrid(

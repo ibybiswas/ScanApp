@@ -62,7 +62,8 @@ fun HomeScreen(
     sortBy: DocumentSortBy = DocumentSortBy.DATE_MODIFIED,
     sortDirection: SortDirection = SortDirection.DESCENDING,
     onSortChange: (DocumentSortBy, SortDirection) -> Unit = { _, _ -> },
-    onMeClick: () -> Unit = {}
+    onMeClick: () -> Unit = {},
+    onToolsClick: () -> Unit = {}
 ) {
     var actionSheetTarget by remember { mutableStateOf<RecentDocument?>(null) }
     var renameTarget by remember { mutableStateOf<RecentDocument?>(null) }
@@ -119,7 +120,7 @@ fun HomeScreen(
                 )
             }
         },
-        bottomBar = { ScanAppBottomNav(onMeClick = onMeClick) },
+        bottomBar = { ScanAppBottomNav(onMeClick = onMeClick, onToolsClick = onToolsClick) },
         floatingActionButton = {
             if (!selectionMode) {
                 FloatingActionButton(onClick = onScanClick) {
@@ -437,7 +438,7 @@ private fun EmptyRecentsState(modifier: Modifier = Modifier, isSearching: Boolea
 }
 
 @Composable
-private fun ScanAppBottomNav(onMeClick: () -> Unit = {}) {
+private fun ScanAppBottomNav(onMeClick: () -> Unit = {}, onToolsClick: () -> Unit = {}) {
     var selected by remember { mutableStateOf(0) }
     val items = listOf(
         Triple("Home", Icons.Filled.Home, 0),
@@ -450,10 +451,15 @@ private fun ScanAppBottomNav(onMeClick: () -> Unit = {}) {
             NavigationBarItem(
                 selected = selected == index,
                 onClick = {
-                    selected = index
-                    // Home/Files/Tools remain visual-only placeholders for now;
-                    // only "Me" routes to a real screen (the new Settings screen).
-                    if (index == 3) onMeClick()
+                    // Home/Files remain visual-only placeholders for now; Tools
+                    // opens the collage builder and Me opens Settings — both
+                    // navigate away immediately, so we don't persist them as
+                    // the "selected" tab the way a real destination would.
+                    when (index) {
+                        2 -> onToolsClick()
+                        3 -> onMeClick()
+                        else -> selected = index
+                    }
                 },
                 icon = { Icon(icon, contentDescription = label) },
                 label = { Text(label) }
