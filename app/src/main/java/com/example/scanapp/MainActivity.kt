@@ -36,7 +36,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class Screen { HOME, DETAIL, PAGE_EDITOR, SCAN_EXPORT }
+private enum class Screen { HOME, DETAIL, PAGE_EDITOR, SCAN_EXPORT, SETTINGS }
 
 class MainActivity : ComponentActivity() {
 
@@ -53,6 +53,9 @@ class MainActivity : ComponentActivity() {
     private var homeSearchQuery by mutableStateOf("")
     private var homeSortBy by mutableStateOf(DocumentSortBy.DATE_MODIFIED)
     private var homeSortDirection by mutableStateOf(SortDirection.DESCENDING)
+    private var updateStatus by mutableStateOf(com.example.scanapp.ui.UpdateCheckUiStatus.IDLE)
+    private var updateStatusMessage by mutableStateOf<String?>(null)
+    private var latestReleaseUrl by mutableStateOf<String?>(null)
 
     // Currently-open document (DETAIL/PAGE_EDITOR screens) and page (PAGE_EDITOR only).
     private var openDocumentId by mutableStateOf<Long?>(null)
@@ -109,7 +112,8 @@ class MainActivity : ComponentActivity() {
                     onSearchQueryChange = { query -> onHomeSearchQueryChange(query) },
                     sortBy = homeSortBy,
                     sortDirection = homeSortDirection,
-                    onSortChange = { sortBy, direction -> onHomeSortChange(sortBy, direction) }
+                    onSortChange = { sortBy, direction -> onHomeSortChange(sortBy, direction) },
+                    onMeClick = { currentScreen = Screen.SETTINGS }
                 )
                 Screen.DETAIL -> {
                     val documentId = openDocumentId
@@ -154,6 +158,19 @@ class MainActivity : ComponentActivity() {
                     onBackClick = {
                         currentScreen = if (openDocumentId != null) Screen.DETAIL else Screen.HOME
                     }
+                )
+                Screen.SETTINGS -> com.example.scanapp.ui.SettingsScreen(
+                    versionName = com.example.scanapp.BuildConfig.VERSION_NAME,
+                    versionCode = com.example.scanapp.BuildConfig.VERSION_CODE,
+                    updateStatus = updateStatus,
+                    updateStatusMessage = updateStatusMessage,
+                    onCheckForUpdateClick = { checkForUpdate() },
+                    onOpenReleaseClick = {
+                        latestReleaseUrl?.let { url ->
+                            startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
+                        }
+                    },
+                    onBackClick = { currentScreen = Screen.HOME }
                 )
             }
         }
@@ -217,8 +234,11 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Routes a finished scan to the right place depending on which flow
-     * triggered it: a brand-new document, more pages appended to an existing
-     * one, or a single-page replacement from the editor's Re-scan action.
+     * triggered it: a brand-new document goes straight to the export screen
+     * (skipping the detail viewer, so the user can export immediately);
+     * more pages appended to an existing one return to that document's detail
+     * view; a single-page replacement from the editor's Re-scan action returns
+     * to the detail view too.
      */
     private fun onScanCompleted(uris: List<Uri>) {
         if (uris.isEmpty()) return
@@ -227,7 +247,14 @@ class MainActivity : ComponentActivity() {
                 lifecycleScope.launch {
                     val title = "Scan ${SimpleDateFormat("MM-dd-yyyy HH.mm", Locale.getDefault()).format(Date())}"
                     val documentId = repository.saveNewDocument(uris, title)
-                    openDocumentDetailById(documentId)
+                    repository.touchAccessed(documentId)
+                    openDocumentId = documentId
+                    refreshOpenDocument(documentId)
+                    // Skip the detail viewer — go directly to export so the user
+                    // isn't forced through an extra screen after every scan.
+                    scannedPages = uris
+                    exportResultText = null
+                    currentScreen = Screen.SCAN_EXPORT
                 }
             }
             is PendingScan.AddPages -> {
@@ -349,6 +376,31 @@ class MainActivity : ComponentActivity() {
         if (ids.isEmpty()) return
         lifecycleScope.launch {
             ids.forEach { id -> repository.deleteDocument(id) }
+        }
+    }
+
+    /** Triggered from the Settings ("Me") screen's "Check for update" row. */
+    private fun checkForUpdate() {
+        updateStatus = com.example.scanapp.ui.UpdateCheckUiStatus.CHECKING
+        updateStatusMessage = null
+        lifecycleScope.launch {
+            val result = com.example.scanapp.update.UpdateChecker.checkForUpdate(
+                com.example.scanapp.BuildConfig.VERSION_NAME
+            )
+            when (result) {
+                is com.example.scanapp.update.UpdateCheckResult.UpToDate -> {
+                    updateStatus = com.example.scanapp.ui.UpdateCheckUiStatus.UP_TO_DATE
+                }
+                is com.example.scanapp.update.UpdateCheckResult.UpdateAvailable -> {
+                    updateStatus = com.example.scanapp.ui.UpdateCheckUiStatus.UPDATE_AVAILABLE
+                    updateStatusMessage = "Version ${result.latestVersion} is available (you have ${result.currentVersion})"
+                    latestReleaseUrl = result.releaseUrl
+                }
+                is com.example.scanapp.update.UpdateCheckResult.Error -> {
+                    updateStatus = com.example.scanapp.ui.UpdateCheckUiStatus.ERROR
+                    updateStatusMessage = result.message
+                }
+            }
         }
     }
 
