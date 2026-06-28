@@ -1,6 +1,7 @@
 package com.example.scanapp
 
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
@@ -12,11 +13,14 @@ import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import com.example.scanapp.data.DocumentEntity
 import com.example.scanapp.data.DocumentRepository
+import com.example.scanapp.edit.PageEditorScreen
 import com.example.scanapp.export.ExportEngine
 import com.example.scanapp.export.ExportOptions
 import com.example.scanapp.export.OutputFormat
 import com.example.scanapp.export.PublicDocumentSaver
 import com.example.scanapp.scan.DocumentScannerLauncher
+import com.example.scanapp.ui.DetailPage
+import com.example.scanapp.ui.DocumentDetailScreen
 import com.example.scanapp.ui.ExportUiState
 import com.example.scanapp.ui.HomeScreen
 import com.example.scanapp.ui.RecentDocument
@@ -29,7 +33,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class Screen { HOME, SCAN_EXPORT }
+private enum class Screen { HOME, DETAIL, PAGE_EDITOR, SCAN_EXPORT }
 
 class MainActivity : ComponentActivity() {
 
@@ -44,13 +48,40 @@ class MainActivity : ComponentActivity() {
     private var exportResultText by mutableStateOf<String?>(null)
     private var recentDocuments by mutableStateOf<List<RecentDocument>>(emptyList())
 
+    // Currently-open document (DETAIL/PAGE_EDITOR screens) and page (PAGE_EDITOR only).
+    private var openDocumentId by mutableStateOf<Long?>(null)
+    private var openDocumentTitle by mutableStateOf("")
+    private var openDocumentPages by mutableStateOf<List<DetailPage>>(emptyList())
+    private var editingPage by mutableStateOf<DetailPage?>(null)
+
+    /**
+     * The scanner launcher is reused for three distinct flows (new document,
+     * adding pages to an existing one, re-scanning a single page to replace it).
+     * Since GmsDocumentScanner's result callback doesn't carry caller context,
+     * we track which flow is in-flight here and branch on it in onResult.
+     */
+    private sealed class PendingScan {
+        object NewDocument : PendingScan()
+        data class AddPages(val documentId: Long) : PendingScan()
+        data class ReplacePage(val documentId: Long, val pageId: Long) : PendingScan()
+    }
+    private var pendingScan: PendingScan = PendingScan.NewDocument
+    private lateinit var singlePageScannerLauncher: DocumentScannerLauncher
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         scannerLauncher = DocumentScannerLauncher(
             activity = this,
             onResult = { uris -> onScanCompleted(uris) },
-            onError = { e -> exportResultText = "Scan failed: ${e.message}" }
+            onError = { e -> exportResultText = "Scan failed: ${e.message}" },
+            pageLimit = 20
+        )
+        singlePageScannerLauncher = DocumentScannerLauncher(
+            activity = this,
+            onResult = { uris -> onScanCompleted(uris) },
+            onError = { e -> exportResultText = "Scan failed: ${e.message}" },
+            pageLimit = 1
         )
 
         observeLibrary()
@@ -60,18 +91,54 @@ class MainActivity : ComponentActivity() {
                 Screen.HOME -> HomeScreen(
                     recentDocuments = recentDocuments,
                     onScanClick = { scannerLauncher.launch() },
-                    onDocumentClick = { doc -> openExistingDocument(doc) },
+                    onDocumentClick = { doc -> openDocumentDetail(doc) },
                     onRename = { doc, newTitle -> renameDocument(doc, newTitle) },
                     onDelete = { doc -> deleteDocument(doc) },
-                    onShare = { doc, format -> shareDocument(doc, format) }
+                    onShare = { doc, format -> shareDocument(doc.id, doc.title, format) }
                 )
+                Screen.DETAIL -> {
+                    val documentId = openDocumentId
+                    if (documentId == null) {
+                        currentScreen = Screen.HOME
+                    } else {
+                        DocumentDetailScreen(
+                            title = openDocumentTitle,
+                            pages = openDocumentPages,
+                            onBackClick = { currentScreen = Screen.HOME },
+                            onRename = { newTitle -> renameOpenDocument(documentId, newTitle) },
+                            onDelete = { deleteOpenDocument(documentId) },
+                            onShare = { format -> shareDocument(documentId, openDocumentTitle, format) },
+                            onExportClick = { openExportScreenForOpenDocument() },
+                            onPageClick = { page -> editingPage = page; currentScreen = Screen.PAGE_EDITOR },
+                            onAddPagesClick = { launchAddPagesScan(documentId) },
+                            onDeletePage = { page -> deletePageFromOpenDocument(documentId, page) },
+                            onReorder = { orderedIds -> reorderOpenDocumentPages(documentId, orderedIds) }
+                        )
+                    }
+                }
+                Screen.PAGE_EDITOR -> {
+                    val page = editingPage
+                    val documentId = openDocumentId
+                    if (page == null || documentId == null) {
+                        currentScreen = Screen.DETAIL
+                    } else {
+                        PageEditorScreen(
+                            pageFilePath = page.uri.path ?: "",
+                            onSave = { editedBitmap -> savePageEdit(documentId, page.pageId, editedBitmap) },
+                            onRescanRequested = { launchPageRescan(documentId, page.pageId) },
+                            onCancel = { currentScreen = Screen.DETAIL }
+                        )
+                    }
+                }
                 Screen.SCAN_EXPORT -> ScanScreen(
                     scannedPages = scannedPages,
                     isExporting = isExporting,
                     exportResultText = exportResultText,
                     onScanClick = { scannerLauncher.launch() },
                     onExportClick = { uiState -> runExport(uiState) },
-                    onBackClick = { currentScreen = Screen.HOME }
+                    onBackClick = {
+                        currentScreen = if (openDocumentId != null) Screen.DETAIL else Screen.HOME
+                    }
                 )
             }
         }
@@ -100,58 +167,148 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    /** New scan finished: persist it to the library immediately, then open it for export. */
+    /**
+     * Routes a finished scan to the right place depending on which flow
+     * triggered it: a brand-new document, more pages appended to an existing
+     * one, or a single-page replacement from the editor's Re-scan action.
+     */
     private fun onScanCompleted(uris: List<Uri>) {
         if (uris.isEmpty()) return
-        lifecycleScope.launch {
-            val title = "Scan ${SimpleDateFormat("MM-dd-yyyy HH.mm", Locale.getDefault()).format(Date())}"
-            repository.saveNewDocument(uris, title)
-            // Keep using the original scanner URIs for this export session — they're
-            // still valid cache files at this point and avoids an extra disk read.
-            scannedPages = uris
-            currentScreen = Screen.SCAN_EXPORT
+        when (val pending = pendingScan) {
+            is PendingScan.NewDocument -> {
+                lifecycleScope.launch {
+                    val title = "Scan ${SimpleDateFormat("MM-dd-yyyy HH.mm", Locale.getDefault()).format(Date())}"
+                    val documentId = repository.saveNewDocument(uris, title)
+                    openDocumentDetailById(documentId)
+                }
+            }
+            is PendingScan.AddPages -> {
+                lifecycleScope.launch {
+                    repository.addPagesToDocument(pending.documentId, uris)
+                    refreshOpenDocument(pending.documentId)
+                }
+            }
+            is PendingScan.ReplacePage -> {
+                // Re-scan returns a fresh page image; treat its first result as
+                // the replacement bitmap for the page being edited.
+                lifecycleScope.launch {
+                    val bitmap = withContext(Dispatchers.IO) {
+                        contentResolver.openInputStream(uris.first())?.use { BitmapFactory.decodeStream(it) }
+                    } ?: return@launch
+                    repository.replacePageImage(pending.documentId, pending.pageId, bitmap)
+                    refreshOpenDocument(pending.documentId)
+                    currentScreen = Screen.DETAIL
+                }
+            }
         }
     }
 
-    private fun openExistingDocument(doc: RecentDocument) {
+    private fun openDocumentDetail(doc: RecentDocument) {
         val documentId = doc.id.toLongOrNull() ?: return
+        openDocumentDetailById(documentId)
+    }
+
+    private fun openDocumentDetailById(documentId: Long) {
         lifecycleScope.launch {
             repository.touchAccessed(documentId)
-            val withPages = repository.getDocumentWithPages(documentId) ?: return@launch
-            scannedPages = withPages.pages.map { File(it.filePath).toUri() }
-            currentScreen = Screen.SCAN_EXPORT
+            openDocumentId = documentId
+            currentScreen = Screen.DETAIL
+            refreshOpenDocument(documentId)
         }
     }
 
-    private fun renameDocument(doc: RecentDocument, newTitle: String) {
-        val documentId = doc.id.toLongOrNull() ?: return
+    /** Re-reads the open document's title + pages from the DB into UI state. */
+    private suspend fun refreshOpenDocument(documentId: Long) {
+        val withPages = repository.getDocumentWithPages(documentId) ?: return
+        openDocumentTitle = withPages.document.title
+        openDocumentPages = withPages.pages.map { page ->
+            DetailPage(
+                pageId = page.id,
+                pageIndex = page.pageIndex,
+                uri = File(page.filePath).toUri()
+            )
+        }
+    }
+
+    private fun renameOpenDocument(documentId: Long, newTitle: String) {
         lifecycleScope.launch {
             repository.renameDocument(documentId, newTitle)
-            // observeLibrary's Flow picks up the change automatically; no manual refresh needed.
+            refreshOpenDocument(documentId)
         }
+    }
+
+    private fun deleteOpenDocument(documentId: Long) {
+        lifecycleScope.launch {
+            repository.deleteDocument(documentId)
+            openDocumentId = null
+            currentScreen = Screen.HOME
+        }
+    }
+
+    private fun launchAddPagesScan(documentId: Long) {
+        pendingScan = PendingScan.AddPages(documentId)
+        scannerLauncher.launch()
+    }
+
+    private fun deletePageFromOpenDocument(documentId: Long, page: DetailPage) {
+        lifecycleScope.launch {
+            repository.deletePageFromDocument(documentId, page.pageId)
+            refreshOpenDocument(documentId)
+        }
+    }
+
+    private fun reorderOpenDocumentPages(documentId: Long, orderedPageIds: List<Long>) {
+        lifecycleScope.launch {
+            repository.reorderPages(documentId, orderedPageIds)
+            refreshOpenDocument(documentId)
+        }
+    }
+
+    private fun savePageEdit(documentId: Long, pageId: Long, editedBitmap: Bitmap) {
+        lifecycleScope.launch {
+            repository.replacePageImage(documentId, pageId, editedBitmap)
+            refreshOpenDocument(documentId)
+            currentScreen = Screen.DETAIL
+        }
+    }
+
+    private fun launchPageRescan(documentId: Long, pageId: Long) {
+        pendingScan = PendingScan.ReplacePage(documentId, pageId)
+        singlePageScannerLauncher.launch()
+    }
+
+    /** Detail screen's "Export" action: reuse the existing size-limited export flow. */
+    private fun openExportScreenForOpenDocument() {
+        scannedPages = openDocumentPages.map { it.uri }
+        exportResultText = null
+        currentScreen = Screen.SCAN_EXPORT
+    }
+
+    /** Rename/delete from the Home screen's long-press menu — delegates to the ID-based versions. */
+    private fun renameDocument(doc: RecentDocument, newTitle: String) {
+        val documentId = doc.id.toLongOrNull() ?: return
+        lifecycleScope.launch { repository.renameDocument(documentId, newTitle) }
     }
 
     private fun deleteDocument(doc: RecentDocument) {
         val documentId = doc.id.toLongOrNull() ?: return
-        lifecycleScope.launch {
-            repository.deleteDocument(documentId)
-        }
+        lifecycleScope.launch { repository.deleteDocument(documentId) }
     }
 
     /**
      * Builds the requested format at full quality (no size limit — sharing is
      * "send as-is", distinct from the size-constrained Export flow) into the
      * app's cache, then hands it to the Android share sheet via FileProvider.
+     * Called from both Home's long-press menu and the Detail screen's share icon.
      */
-    private fun shareDocument(doc: RecentDocument, format: OutputFormat) {
-        val documentId = doc.id.toLongOrNull() ?: return
+    private fun shareDocument(documentId: Long, title: String, format: OutputFormat) {
         lifecycleScope.launch {
             val withPages = repository.getDocumentWithPages(documentId) ?: return@launch
             val pageUris = withPages.pages.map { File(it.filePath).toUri() }
             if (pageUris.isEmpty()) return@launch
 
             val shareDir = File(cacheDir, "share_scratch").apply { mkdirs() }
-            val safeName = doc.title.replace(Regex("[^A-Za-z0-9 _-]"), "_").ifBlank { "scan" }
+            val safeName = title.replace(Regex("[^A-Za-z0-9 _-]"), "_").ifBlank { "scan" }
 
             when (format) {
                 OutputFormat.PDF -> {
