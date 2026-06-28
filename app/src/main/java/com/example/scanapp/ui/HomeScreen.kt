@@ -11,12 +11,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
@@ -30,6 +34,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
 import com.example.scanapp.export.OutputFormat
+import com.example.scanapp.data.DocumentSortBy
+import com.example.scanapp.data.SortDirection
 
 /** One saved scan shown in the Recents list. */
 data class RecentDocument(
@@ -37,7 +43,8 @@ data class RecentDocument(
     val title: String,
     val subtitle: String,   // e.g. "Saved 27/06/26 18:09 · 2 pages"
     val thumbnailUri: Uri?,
-    val pageCount: Int
+    val pageCount: Int,
+    val modifiedAtMillis: Long = 0L
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -48,19 +55,75 @@ fun HomeScreen(
     onDocumentClick: (RecentDocument) -> Unit,
     onRename: (RecentDocument, newTitle: String) -> Unit = { _, _ -> },
     onDelete: (RecentDocument) -> Unit = {},
-    onShare: (RecentDocument, OutputFormat) -> Unit = { _, _ -> }
+    onShare: (RecentDocument, OutputFormat) -> Unit = { _, _ -> },
+    onDeleteMultiple: (List<RecentDocument>) -> Unit = {},
+    searchQuery: String = "",
+    onSearchQueryChange: (String) -> Unit = {},
+    sortBy: DocumentSortBy = DocumentSortBy.DATE_MODIFIED,
+    sortDirection: SortDirection = SortDirection.DESCENDING,
+    onSortChange: (DocumentSortBy, SortDirection) -> Unit = { _, _ -> }
 ) {
-    var searchQuery by remember { mutableStateOf("") }
     var actionSheetTarget by remember { mutableStateOf<RecentDocument?>(null) }
     var renameTarget by remember { mutableStateOf<RecentDocument?>(null) }
     var deleteTarget by remember { mutableStateOf<RecentDocument?>(null) }
     var shareTarget by remember { mutableStateOf<RecentDocument?>(null) }
+    var deleteMultipleConfirm by remember { mutableStateOf(false) }
+
+    // Selection mode state. Entered via long-press; exited by tapping the X
+    // in the top bar or once the selection becomes empty after a delete.
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf(setOf<String>()) }
+    // Search bar starts collapsed to a small icon; tapping it (or the icon)
+    // expands it into a full-width field. Collapses again when cleared+unfocused.
+    var searchExpanded by remember { mutableStateOf(searchQuery.isNotEmpty()) }
+    var sortMenuExpanded by remember { mutableStateOf(false) }
+
+    fun clearSelection() {
+        selectionMode = false
+        selectedIds = emptySet()
+    }
+
+    fun toggleSelected(doc: RecentDocument) {
+        selectedIds = if (selectedIds.contains(doc.id)) {
+            selectedIds - doc.id
+        } else {
+            selectedIds + doc.id
+        }
+        if (selectedIds.isEmpty()) selectionMode = false
+    }
 
     Scaffold(
+        topBar = {
+            if (selectionMode) {
+                TopAppBar(
+                    title = { Text("${selectedIds.size} selected") },
+                    navigationIcon = {
+                        IconButton(onClick = { clearSelection() }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Cancel selection")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = {
+                            shareTarget = recentDocuments.firstOrNull { it.id in selectedIds }
+                        }, enabled = selectedIds.size == 1) {
+                            Icon(Icons.Filled.Share, contentDescription = "Share")
+                        }
+                        IconButton(
+                            onClick = { deleteMultipleConfirm = true },
+                            enabled = selectedIds.isNotEmpty()
+                        ) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete selected")
+                        }
+                    }
+                )
+            }
+        },
         bottomBar = { ScanAppBottomNav() },
         floatingActionButton = {
-            FloatingActionButton(onClick = onScanClick) {
-                Icon(Icons.Filled.CameraAlt, contentDescription = "Scan document")
+            if (!selectionMode) {
+                FloatingActionButton(onClick = onScanClick) {
+                    Icon(Icons.Filled.CameraAlt, contentDescription = "Scan document")
+                }
             }
         }
     ) { padding ->
@@ -69,48 +132,103 @@ fun HomeScreen(
                 .padding(padding)
                 .fillMaxSize()
         ) {
-            // Search bar
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = { Text("Search") },
-                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                singleLine = true,
-                shape = RoundedCornerShape(28.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-            )
-
-            // Section header
+            // Header row: compact search icon/field + "All files" + select/sort controls.
+            // Search starts as a small icon button (per request) rather than a
+            // full-width bar, and expands in place when tapped.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    "Recents",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
-                )
-                if (recentDocuments.isNotEmpty()) {
-                    TextButton(onClick = { /* navigate to full Files list */ }) {
-                        Text("See All")
+                if (searchExpanded) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = onSearchQueryChange,
+                        placeholder = { Text("Search files") },
+                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                        trailingIcon = {
+                            IconButton(onClick = {
+                                onSearchQueryChange("")
+                                searchExpanded = false
+                            }) {
+                                Icon(Icons.Filled.Close, contentDescription = "Close search")
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(24.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                    )
+                } else {
+                    Text(
+                        "All files",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = { searchExpanded = true },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(Icons.Filled.Search, contentDescription = "Search")
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    Box {
+                        IconButton(
+                            onClick = { sortMenuExpanded = true },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort")
+                        }
+                        SortMenu(
+                            expanded = sortMenuExpanded,
+                            sortBy = sortBy,
+                            direction = sortDirection,
+                            onDismiss = { sortMenuExpanded = false },
+                            onSelect = { newSortBy, newDirection ->
+                                sortMenuExpanded = false
+                                onSortChange(newSortBy, newDirection)
+                            }
+                        )
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    if (recentDocuments.isNotEmpty()) {
+                        TextButton(onClick = {
+                            selectionMode = true
+                            selectedIds = recentDocuments.map { it.id }.toSet()
+                        }) {
+                            Text("Select all")
+                        }
                     }
                 }
             }
 
             if (recentDocuments.isEmpty()) {
-                EmptyRecentsState(modifier = Modifier.weight(1f))
+                EmptyRecentsState(
+                    modifier = Modifier.weight(1f),
+                    isSearching = searchQuery.isNotBlank()
+                )
             } else {
                 LazyColumn(modifier = Modifier.weight(1f)) {
                     items(recentDocuments, key = { it.id }) { doc ->
                         RecentDocumentRow(
                             doc = doc,
-                            onClick = { onDocumentClick(doc) },
-                            onLongClick = { actionSheetTarget = doc }
+                            selectionMode = selectionMode,
+                            selected = doc.id in selectedIds,
+                            onClick = {
+                                if (selectionMode) toggleSelected(doc) else onDocumentClick(doc)
+                            },
+                            onLongClick = {
+                                if (!selectionMode) {
+                                    selectionMode = true
+                                    selectedIds = setOf(doc.id)
+                                } else {
+                                    toggleSelected(doc)
+                                }
+                            },
+                            onMoreClick = { actionSheetTarget = doc }
                         )
                         HorizontalDivider(modifier = Modifier.padding(start = 96.dp))
                     }
@@ -152,17 +270,95 @@ fun HomeScreen(
         )
     }
 
+    if (deleteMultipleConfirm) {
+        val targets = recentDocuments.filter { it.id in selectedIds }
+        AlertDialog(
+            onDismissRequest = { deleteMultipleConfirm = false },
+            title = { Text("Delete ${targets.size} document${if (targets.size == 1) "" else "s"}?") },
+            text = { Text("This will permanently delete the selected document(s) and all their pages.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteMultipleConfirm = false
+                    onDeleteMultiple(targets)
+                    clearSelection()
+                }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteMultipleConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
+
     shareTarget?.let { doc ->
         ShareFormatSheet(
-            onFormatSelected = { format -> shareTarget = null; onShare(doc, format) },
+            onFormatSelected = { format -> shareTarget = null; onShare(doc, format); clearSelection() },
             onDismiss = { shareTarget = null }
         )
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SortMenu(
+    expanded: Boolean,
+    sortBy: DocumentSortBy,
+    direction: SortDirection,
+    onDismiss: () -> Unit,
+    onSelect: (DocumentSortBy, SortDirection) -> Unit
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        Text(
+            "Sort by",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+        )
+        SortMenuItem("Name (A–Z)", sortBy == DocumentSortBy.NAME && direction == SortDirection.ASCENDING) {
+            onSelect(DocumentSortBy.NAME, SortDirection.ASCENDING)
+        }
+        SortMenuItem("Name (Z–A)", sortBy == DocumentSortBy.NAME && direction == SortDirection.DESCENDING) {
+            onSelect(DocumentSortBy.NAME, SortDirection.DESCENDING)
+        }
+        SortMenuItem(
+            "Date modified (newest)",
+            sortBy == DocumentSortBy.DATE_MODIFIED && direction == SortDirection.DESCENDING
+        ) { onSelect(DocumentSortBy.DATE_MODIFIED, SortDirection.DESCENDING) }
+        SortMenuItem(
+            "Date modified (oldest)",
+            sortBy == DocumentSortBy.DATE_MODIFIED && direction == SortDirection.ASCENDING
+        ) { onSelect(DocumentSortBy.DATE_MODIFIED, SortDirection.ASCENDING) }
+        SortMenuItem(
+            "Page count (most)",
+            sortBy == DocumentSortBy.PAGE_COUNT && direction == SortDirection.DESCENDING
+        ) { onSelect(DocumentSortBy.PAGE_COUNT, SortDirection.DESCENDING) }
+        SortMenuItem(
+            "Page count (fewest)",
+            sortBy == DocumentSortBy.PAGE_COUNT && direction == SortDirection.ASCENDING
+        ) { onSelect(DocumentSortBy.PAGE_COUNT, SortDirection.ASCENDING) }
+    }
+}
+
+@Composable
+private fun SortMenuItem(label: String, selected: Boolean, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) },
+        onClick = onClick,
+        trailingIcon = { if (selected) Icon(Icons.Filled.Check, contentDescription = null) }
+    )
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun RecentDocumentRow(doc: RecentDocument, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun RecentDocumentRow(
+    doc: RecentDocument,
+    selectionMode: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onMoreClick: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -170,6 +366,11 @@ private fun RecentDocumentRow(doc: RecentDocument, onClick: () -> Unit, onLongCl
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (selectionMode) {
+            Checkbox(checked = selected, onCheckedChange = { onClick() })
+            Spacer(Modifier.width(4.dp))
+        }
+
         Box(
             modifier = Modifier
                 .size(64.dp)
@@ -205,22 +406,28 @@ private fun RecentDocumentRow(doc: RecentDocument, onClick: () -> Unit, onLongCl
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+
+        if (!selectionMode) {
+            IconButton(onClick = onMoreClick) {
+                Icon(Icons.Filled.MoreVert, contentDescription = "More options")
+            }
+        }
     }
 }
 
 @Composable
-private fun EmptyRecentsState(modifier: Modifier = Modifier) {
+private fun EmptyRecentsState(modifier: Modifier = Modifier, isSearching: Boolean = false) {
     Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
-                Icons.Filled.Description,
+                if (isSearching) Icons.Filled.Search else Icons.Filled.Description,
                 contentDescription = null,
                 modifier = Modifier.size(48.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "No scans yet — tap the camera button to start",
+                if (isSearching) "No documents match your search" else "No scans yet — tap the camera button to start",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
