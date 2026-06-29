@@ -50,6 +50,34 @@ fun CollagePageSize.canvasPx(orientation: CollageOrientation): Pair<Int, Int> =
 data class CollageCell(val rect: RectF)
 
 /**
+ * A user adjustment layered on top of a cell's default fit-to-cell framing:
+ * extra zoom beyond the minimum that fills the cell, plus a pan offset
+ * (in cell-relative fractions, so it scales correctly regardless of the
+ * cell's actual pixel size at render time vs. export time).
+ *
+ * scale = 1f means "just fills the cell, no extra zoom" — the same framing
+ * CollageCompositor already produced before any per-cell editing existed.
+ * Values above 1f zoom in further (cropping more of the page to fill the
+ * cell), matching the drag-handle resize gesture in the reference editor.
+ */
+data class CollageCellTransform(
+    val scale: Float = 1f,
+    val offsetFractionX: Float = 0f,
+    val offsetFractionY: Float = 0f
+)
+
+/**
+ * Which page (if any) occupies a given cell index, plus that cell's own
+ * transform. Indexed by cell position within the template rather than by
+ * page id, since the whole point of per-cell editing is that a cell can be
+ * empty, reassigned, or independently adjusted regardless of selection order.
+ */
+data class CollageCellAssignment(
+    val pageId: Long?,
+    val transform: CollageCellTransform = CollageCellTransform()
+)
+
+/**
  * A collage template is just a named arrangement of cells. The compositor
  * doesn't care how many pages were picked vs. how many cells exist — see
  * CollageCompositor for how mismatches are handled (extra cells stay blank,
@@ -131,6 +159,7 @@ object CollageTemplates {
  */
 object CollageCompositor {
 
+    /** Legacy entry point: pages fill cells in order, no per-cell adjustment. Kept for callers not yet using per-cell editing. */
     fun compose(
         pages: List<Bitmap>,
         template: CollageTemplate,
@@ -140,35 +169,92 @@ object CollageCompositor {
         val result = Bitmap.createBitmap(canvasWidthPx, canvasHeightPx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
         canvas.drawColor(Color.WHITE)
-
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
         template.cells.forEachIndexed { index, cell ->
-            val page = pages.getOrNull(index) ?: return@forEachIndexed // blank cell, nothing to draw
+            val page = pages.getOrNull(index) ?: return@forEachIndexed
+            drawPageInCell(canvas, paint, page, cell, canvasWidthPx, canvasHeightPx, CollageCellTransform())
+        }
+        return result
+    }
 
-            val cellLeft = cell.rect.left * canvasWidthPx
-            val cellTop = cell.rect.top * canvasHeightPx
-            val cellWidth = (cell.rect.right - cell.rect.left) * canvasWidthPx
-            val cellHeight = (cell.rect.bottom - cell.rect.top) * canvasHeightPx
+    /**
+     * Per-cell-aware composition: each cell may have its own page assignment
+     * and its own zoom/pan transform, exactly mirroring what the live preview
+     * in CollageScreen rendered — this is what makes "Save" produce the same
+     * framing the person actually arranged, not just a default fit-to-cell
+     * version of it.
+     */
+    fun composeWithAssignments(
+        pageBitmaps: Map<Long, Bitmap>,
+        assignments: List<CollageCellAssignment>,
+        template: CollageTemplate,
+        canvasWidthPx: Int,
+        canvasHeightPx: Int
+    ): Bitmap {
+        val result = Bitmap.createBitmap(canvasWidthPx, canvasHeightPx, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(result)
+        canvas.drawColor(Color.WHITE)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
-            val pageAspect = page.width.toFloat() / page.height.toFloat()
-            val cellAspect = cellWidth / cellHeight
+        template.cells.forEachIndexed { index, cell ->
+            val assignment = assignments.getOrNull(index) ?: return@forEachIndexed
+            val pageId = assignment.pageId ?: return@forEachIndexed // empty cell, nothing to draw
+            val page = pageBitmaps[pageId] ?: return@forEachIndexed
+            drawPageInCell(canvas, paint, page, cell, canvasWidthPx, canvasHeightPx, assignment.transform)
+        }
+        return result
+    }
 
-            val (drawWidth, drawHeight) = if (pageAspect > cellAspect) {
-                // Page is relatively wider than the cell -> fit to cell width
-                cellWidth to (cellWidth / pageAspect)
-            } else {
-                // Page is relatively taller than the cell -> fit to cell height
-                (cellHeight * pageAspect) to cellHeight
-            }
+    /**
+     * Draws one page into one cell, applying the base fit-to-cell framing
+     * (preserve aspect ratio, centered — for documents, a little empty
+     * margin beats losing part of the page to a crop) and then the user's
+     * extra scale/pan on top of that base framing.
+     */
+    private fun drawPageInCell(
+        canvas: Canvas,
+        paint: Paint,
+        page: Bitmap,
+        cell: CollageCell,
+        canvasWidthPx: Int,
+        canvasHeightPx: Int,
+        transform: CollageCellTransform
+    ) {
+        val cellLeft = cell.rect.left * canvasWidthPx
+        val cellTop = cell.rect.top * canvasHeightPx
+        val cellWidth = (cell.rect.right - cell.rect.left) * canvasWidthPx
+        val cellHeight = (cell.rect.bottom - cell.rect.top) * canvasHeightPx
 
-            val drawLeft = cellLeft + (cellWidth - drawWidth) / 2f
-            val drawTop = cellTop + (cellHeight - drawHeight) / 2f
+        val pageAspect = page.width.toFloat() / page.height.toFloat()
+        val cellAspect = cellWidth / cellHeight
 
-            val destRect = RectF(drawLeft, drawTop, drawLeft + drawWidth, drawTop + drawHeight)
-            canvas.drawBitmap(page, null, destRect, paint)
+        val (baseWidth, baseHeight) = if (pageAspect > cellAspect) {
+            cellWidth to (cellWidth / pageAspect)
+        } else {
+            (cellHeight * pageAspect) to cellHeight
         }
 
-        return result
+        // User's extra zoom on top of the base fit-to-cell size.
+        val drawWidth = baseWidth * transform.scale
+        val drawHeight = baseHeight * transform.scale
+
+        // Centered placement, then the user's pan offset — expressed as a
+        // fraction of cell size so it's resolution-independent between the
+        // (usually smaller) preview render and this (usually larger) export
+        // canvas.
+        val baseLeft = cellLeft + (cellWidth - drawWidth) / 2f
+        val baseTop = cellTop + (cellHeight - drawHeight) / 2f
+        val drawLeft = baseLeft + transform.offsetFractionX * cellWidth
+        val drawTop = baseTop + transform.offsetFractionY * cellHeight
+
+        // Clip to the cell's own bounds — zooming in (scale > 1) makes the
+        // drawn image larger than the cell, and without clipping it would
+        // bleed into neighboring cells rather than just cropping within its own.
+        canvas.save()
+        canvas.clipRect(cellLeft, cellTop, cellLeft + cellWidth, cellTop + cellHeight)
+        val destRect = RectF(drawLeft, drawTop, drawLeft + drawWidth, drawTop + drawHeight)
+        canvas.drawBitmap(page, null, destRect, paint)
+        canvas.restore()
     }
 }
