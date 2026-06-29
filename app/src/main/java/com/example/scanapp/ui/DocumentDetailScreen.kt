@@ -195,7 +195,7 @@ fun DocumentDetailScreen(
                             .fillMaxWidth()
                             .then(
                                 if (pages.size == 1) Modifier.height((configuration.screenHeightDp * 0.7f).dp)
-                                else if (pages.size == 2) Modifier.height(280.dp)
+                                else if (pages.size == 2) Modifier.height((configuration.screenHeightDp * 0.4f).dp)
                                 else Modifier.aspectRatio(0.75f)
                             )
                             .clip(RoundedCornerShape(12.dp))
@@ -222,7 +222,7 @@ fun DocumentDetailScreen(
                         Image(
                             painter = rememberAsyncImagePainter(page.uri),
                             contentDescription = "Page ${page.pageIndex + 1}",
-                            contentScale = ContentScale.Crop,
+                            contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxSize()
                         )
 
