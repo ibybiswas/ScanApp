@@ -46,14 +46,33 @@ jobs:
           if-no-files-found: error
 
       # --- GitHub Release publishing (only on actual pushes to main, not PRs) ---
-      # Builds the RELEASE variant too (signed with the AGP debug keystore for
-      # now — see the signingConfigs comment in app/build.gradle.kts about
-      # generating a real release keystore before distributing this widely)
-      # and attaches it to an auto-tagged GitHub Release so it's installable
-      # directly from the Releases page, not just from a logged-in Actions run.
+      # Builds the RELEASE variant, now signed with a real, permanent release
+      # key instead of AGP's debug keystore (see the signingConfigs comment in
+      # app/build.gradle.kts for why that was silently breaking installs over
+      # previous releases — TL;DR: the debug keystore isn't a real file, it's
+      # generated fresh per machine, and every Actions run is a fresh machine).
+      #
+      # RELEASE_KEYSTORE_BASE64 holds the keystore file itself, base64-encoded
+      # (binary secrets can't be stored directly in repo secrets). Decoded
+      # back to a real .jks file here, used only for this run, then discarded
+      # along with the rest of the throwaway VM.
+      - name: Decode release keystore
+        if: github.event_name == 'push'
+        run: printf '%s' "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+
       - name: Build release APK
         if: github.event_name == 'push'
-        run: gradle assembleRelease --no-daemon -PbuildNumber=${{ github.run_number }}
+        run: >
+          gradle assembleRelease --no-daemon
+          -PbuildNumber=${{ github.run_number }}
+          -PRELEASE_STORE_FILE=${{ github.workspace }}/release.keystore
+          -PRELEASE_STORE_PASSWORD=${{ secrets.RELEASE_STORE_PASSWORD }}
+          -PRELEASE_KEY_ALIAS=${{ secrets.RELEASE_KEY_ALIAS }}
+          -PRELEASE_KEY_PASSWORD=${{ secrets.RELEASE_KEY_PASSWORD }}
+
+      - name: Clean up decoded keystore
+        if: always()
+        run: rm -f release.keystore
 
       - name: Generate release tag
         if: github.event_name == 'push'
