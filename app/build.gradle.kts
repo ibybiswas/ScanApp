@@ -36,22 +36,59 @@ android {
         buildConfig = true
     }
 
-    // NOTE: release builds are signed with the debug keystore for now, purely
-    // so the APK attached to GitHub Releases is actually installable on a
-    // device without extra setup. This is NOT secure for a real public
-    // release — anyone with the AGP-default debug keystore (a well-known,
-    // shared file) could sign updates claiming to be this app. Before
-    // distributing this beyond testing, generate a real release keystore
-    // and replace this signingConfig with one that reads its
-    // path/passwords from GitHub Actions secrets instead.
+    // Release builds are signed with a dedicated release key, not the AGP
+    // debug keystore. The debug keystore is NOT a fixed file — AGP generates
+    // a fresh one per machine the first time it's needed, and isn't checked
+    // into the repo. On GitHub Actions specifically, every workflow run is a
+    // brand-new, throwaway VM with no prior ~/.android/debug.keystore, so
+    // AGP silently generated a *different* debug keystore on every single
+    // run. Each Release APK on GitHub ended up signed with a different,
+    // random key — which is exactly why Android refused to install a new
+    // release over an old one without an uninstall first
+    // (INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures don't match), no
+    // matter what versionCode said.
+    //
+    // The fix: one real keystore, generated once, stored only as a GitHub
+    // Actions secret (never committed — see .gitignore), and reused to sign
+    // every release build forever. Credentials are read from Gradle
+    // properties so this file has zero secrets in it. CI supplies them via
+    // -P flags sourced from repo secrets (see .github/workflows/build.yml);
+    // a local dev machine without those properties set falls back to the
+    // debug keystore automatically, so `./gradlew assembleRelease` still
+    // works out of the box for local testing — that local-signed APK just
+    // won't install over a CI-signed one, which is correct: they're
+    // legitimately different keys.
+    val releaseStoreFile = project.findProperty("RELEASE_STORE_FILE") as String?
+    val releaseStorePassword = project.findProperty("RELEASE_STORE_PASSWORD") as String?
+    val releaseKeyAlias = project.findProperty("RELEASE_KEY_ALIAS") as String?
+    val releaseKeyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String?
+    val hasRealReleaseSigning = !releaseStoreFile.isNullOrBlank() &&
+        !releaseStorePassword.isNullOrBlank() &&
+        !releaseKeyAlias.isNullOrBlank() &&
+        !releaseKeyPassword.isNullOrBlank()
+
     signingConfigs {
         getByName("debug") {
             // Uses AGP's default debug keystore — no changes needed here.
         }
+        if (hasRealReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
     buildTypes {
         getByName("release") {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasRealReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                // Local fallback only — see comment above. Never hit on CI
+                // once the repo secrets are configured.
+                signingConfigs.getByName("debug")
+            }
             isMinifyEnabled = false
         }
     }
