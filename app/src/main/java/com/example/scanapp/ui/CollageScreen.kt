@@ -1,6 +1,10 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
 package com.example.scanapp.ui
 
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -8,18 +12,22 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items as rowItems
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
-import androidx.compose.foundation.lazy.items as rowItems
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.CropPortrait
 import androidx.compose.material.icons.filled.CropLandscape
+import androidx.compose.material.icons.filled.CropPortrait
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.InsertPageBreak
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.PhotoSizeSelectActual
@@ -30,244 +38,369 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
-import com.example.scanapp.collage.CollageCellAssignment
-import com.example.scanapp.collage.CollageCellTransform
+import com.example.scanapp.collage.CollageDefaultArrangement
+import com.example.scanapp.collage.CollageLayout
+import com.example.scanapp.collage.CollageLayouts
 import com.example.scanapp.collage.CollageOrientation
+import com.example.scanapp.collage.CollagePage
 import com.example.scanapp.collage.CollagePageSize
-import com.example.scanapp.collage.CollageTemplate
-import com.example.scanapp.collage.CollageTemplates
-import kotlin.math.max
+import com.example.scanapp.collage.CollagePictureFrame
 
-/** One selectable page in the cross-document picker. */
+/**
+ * A single scanned page as shown in the collage page picker — just enough
+ * to render a thumbnail and identify which page got assigned to a frame.
+ */
 data class CollagePickerPage(
     val pageId: Long,
     val uri: Uri,
     val documentTitle: String
 )
 
-private enum class CollageDockTab { PAGE, TEMPLATE, SIZE }
+private const val MIN_FRAME_FRACTION = 0.12f
 
-/**
- * Cross-document collage builder: pick pages, arrange them live in a
- * directly-editable grid (tap a cell to select it, drag its handle to zoom,
- * tap the X to clear it), choose page size, save as a new document.
- *
- * Unlike the previous version of this screen, the grid here is rendered
- * directly in Compose rather than as a pre-composed bitmap preview — that's
- * what makes per-cell drag-to-resize feel immediate rather than waiting on a
- * recompute round-trip for every drag frame. CollageCompositor (bitmap
- * flattening) is only invoked once, at Save, using the same per-cell
- * transforms the live grid used — so the saved file matches what was seen.
- */
-@OptIn(ExperimentalMaterial3Api::class)
+/** Builds a fresh, empty output page sized for [layout]'s picture count. */
+private fun emptyPage(layout: CollageLayout): CollagePage {
+    val rects = CollageDefaultArrangement.ratesFor(layout.picturesPerPage)
+    return CollagePage(frames = rects.map { rect ->
+        CollagePictureFrame.empty(x = rect.left, y = rect.top, width = rect.width(), height = rect.height())
+    })
+}
+
 @Composable
 fun CollageScreen(
     allPages: List<CollagePickerPage>,
     isSaving: Boolean,
     onBackClick: () -> Unit,
     onSaveClick: (
-        template: CollageTemplate,
+        layout: CollageLayout,
         pageSize: CollagePageSize,
         orientation: CollageOrientation,
-        assignments: List<CollageCellAssignment>
+        pages: List<CollagePage>
     ) -> Unit
 ) {
-    var selectedTemplate by remember { mutableStateOf(CollageTemplates.ALL.first()) }
+    var selectedLayout by remember { mutableStateOf(CollageLayouts.ALL.first()) }
     var selectedPageSize by remember { mutableStateOf(CollagePageSize.A4) }
     var selectedOrientation by remember { mutableStateOf(CollageOrientation.PORTRAIT) }
     var activeTab by remember { mutableStateOf(CollageDockTab.PAGE) }
 
-    // One assignment per cell of the CURRENT template, resized whenever the
-    // template changes. Index-aligned with selectedTemplate.cells.
-    var assignments by remember {
-        mutableStateOf(List(selectedTemplate.cells.size) { CollageCellAssignment(pageId = null) })
-    }
+    var pages by remember { mutableStateOf(listOf(emptyPage(selectedLayout))) }
+    var currentPageIndex by remember { mutableStateOf(0) }
 
-    // Which cell (by index) is currently selected, showing the green border +
-    // resize handle + remove X — null means no cell is selected, just a plain grid.
-    var selectedCellIndex by remember { mutableStateOf<Int?>(null) }
-
+    var selectedFrameIndex by remember { mutableStateOf<Int?>(null) }
     var showPagePicker by remember { mutableStateOf(false) }
-    var pendingPageSizeChange by remember { mutableStateOf<CollagePageSize?>(null) }
+    var isFullscreenEdit by remember { mutableStateOf(false) }
 
     val pageById = remember(allPages) { allPages.associateBy { it.pageId } }
 
-    fun resizeAssignmentsForTemplate(newTemplate: CollageTemplate) {
-        // Carry over existing page assignments by cell index where possible
-        // (e.g. growing 2x1 -> 2x2 keeps the first two pages in place rather
-        // than clearing everything), padding/truncating to the new cell count.
-        val carried = List(newTemplate.cells.size) { index -> assignments.getOrNull(index) ?: CollageCellAssignment(pageId = null) }
-        assignments = carried
-        selectedTemplate = newTemplate
-        selectedCellIndex = null
+    /** Re-flows every currently assigned picture across pages sized for [newLayout]. */
+    fun resizePagesForLayout(newLayout: CollageLayout) {
+        val assignedPageIds = pages.flatMap { it.frames }.mapNotNull { it.pageId }
+        selectedLayout = newLayout
+        pages = if (assignedPageIds.isEmpty()) {
+            listOf(emptyPage(newLayout))
+        } else {
+            assignedPageIds.chunked(newLayout.picturesPerPage).map { chunk ->
+                val rects = CollageDefaultArrangement.ratesFor(newLayout.picturesPerPage)
+                CollagePage(frames = chunk.mapIndexed { index, pageId ->
+                    val rect = rects.getOrNull(index) ?: rects.last()
+                    CollagePictureFrame(
+                        pageId = pageId,
+                        xFraction = rect.left,
+                        yFraction = rect.top,
+                        widthFraction = rect.width(),
+                        heightFraction = rect.height()
+                    )
+                })
+            }
+        }
+        currentPageIndex = 0
+        selectedFrameIndex = null
     }
 
-    fun assignPageToCell(cellIndex: Int, pageId: Long) {
-        assignments = assignments.toMutableList().also {
-            it[cellIndex] = CollageCellAssignment(pageId = pageId)
+    /**
+     * Assigns [pickedPageId] to an empty frame on the current page. If the
+     * current page has no empty frame left (already at this layout's
+     * picture count), a brand new page is appended and the picture goes
+     * there instead — this is the "extra page added automatically" behavior.
+     */
+    fun assignPickedPage(pickedPageId: Long) {
+        val current = pages.getOrNull(currentPageIndex) ?: return
+        val emptyIndex = current.frames.indexOfFirst { it.pageId == null }
+        if (emptyIndex >= 0) {
+            val updatedFrame = current.frames[emptyIndex].copy(pageId = pickedPageId)
+            val updatedFrames = current.frames.toMutableList().also { it[emptyIndex] = updatedFrame }
+            pages = pages.toMutableList().also { it[currentPageIndex] = current.copy(frames = updatedFrames) }
+            selectedFrameIndex = emptyIndex
+        } else {
+            val newPage = emptyPage(selectedLayout)
+            val firstFrame = newPage.frames.first().copy(pageId = pickedPageId)
+            val newFrames = newPage.frames.toMutableList().also { it[0] = firstFrame }
+            pages = pages + newPage.copy(frames = newFrames)
+            currentPageIndex = pages.lastIndex
+            selectedFrameIndex = 0
+        }
+        showPagePicker = false
+    }
+
+    fun updateFrame(frameIndex: Int, newFrame: CollagePictureFrame) {
+        val current = pages.getOrNull(currentPageIndex) ?: return
+        val updatedFrames = current.frames.toMutableList().also {
+            if (frameIndex in it.indices) it[frameIndex] = newFrame
+        }
+        pages = pages.toMutableList().also { it[currentPageIndex] = current.copy(frames = updatedFrames) }
+    }
+
+    fun clearFrame(frameIndex: Int) {
+        val current = pages.getOrNull(currentPageIndex) ?: return
+        val frame = current.frames.getOrNull(frameIndex) ?: return
+        updateFrame(frameIndex, frame.copy(pageId = null))
+        selectedFrameIndex = null
+    }
+
+    fun goToPage(index: Int) {
+        if (index in pages.indices) {
+            currentPageIndex = index
+            selectedFrameIndex = null
         }
     }
 
-    fun clearCell(cellIndex: Int) {
-        assignments = assignments.toMutableList().also {
-            it[cellIndex] = CollageCellAssignment(pageId = null)
-        }
-        selectedCellIndex = null
+    fun addBlankPage() {
+        pages = pages + emptyPage(selectedLayout)
+        currentPageIndex = pages.lastIndex
+        selectedFrameIndex = null
     }
 
-    fun updateCellTransform(cellIndex: Int, transform: CollageCellTransform) {
-        assignments = assignments.toMutableList().also {
-            val current = it.getOrNull(cellIndex) ?: return
-            it[cellIndex] = current.copy(transform = transform)
-        }
-    }
-
-    val hasAnyAssignedPage = assignments.any { it.pageId != null }
+    val hasAnyAssignedPage = pages.any { page -> page.frames.any { it.pageId != null } }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Create Collage") },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    TextButton(
-                        onClick = { onSaveClick(selectedTemplate, selectedPageSize, selectedOrientation, assignments) },
-                        enabled = hasAnyAssignedPage && !isSaving
-                    ) {
-                        if (isSaving) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Filled.Check, contentDescription = null)
-                            Spacer(Modifier.width(4.dp))
-                            Text("Save")
+            if (!isFullscreenEdit) {
+                TopAppBar(
+                    title = { Text("Create Collage") },
+                    navigationIcon = {
+                        IconButton(onClick = onBackClick) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        TextButton(
+                            onClick = { onSaveClick(selectedLayout, selectedPageSize, selectedOrientation, pages) },
+                            enabled = hasAnyAssignedPage && !isSaving
+                        ) {
+                            if (isSaving) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Filled.Check, contentDescription = null)
+                                Spacer(Modifier.width(4.dp))
+                                Text("Save")
+                            }
                         }
                     }
-                }
-            )
+                )
+            }
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
 
-            // Live, directly-editable grid — the dominant element on screen.
-            // Tapping empty space (not a cell) deselects whichever cell was active.
-            CollageLiveGrid(
-                template = selectedTemplate,
-                pageSize = selectedPageSize,
-                orientation = selectedOrientation,
-                assignments = assignments,
-                pageById = pageById,
-                selectedCellIndex = selectedCellIndex,
-                onCellTap = { index ->
-                    selectedCellIndex = if (assignments.getOrNull(index)?.pageId == null) {
-                        // Empty cell tapped: jump straight to the page picker
-                        // for it rather than just "selecting" nothing to drag.
-                        showPagePicker = true
-                        index
-                    } else if (selectedCellIndex == index) {
-                        null // tapping the already-selected cell again deselects it
-                    } else {
-                        index
-                    }
-                },
-                onCellTransformChange = { index, transform -> updateCellTransform(index, transform) },
-                onCellClear = { index -> clearCell(index) },
-                modifier = Modifier.weight(1f)
-            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clickable { isFullscreenEdit = true }
+            ) {
+                CollagePageCanvas(
+                    page = pages.getOrNull(currentPageIndex) ?: emptyPage(selectedLayout),
+                    pageSize = selectedPageSize,
+                    orientation = selectedOrientation,
+                    pageById = pageById,
+                    selectedFrameIndex = selectedFrameIndex,
+                    isInteractive = isFullscreenEdit,
+                    onFrameTap = { index ->
+                        if (!isFullscreenEdit) {
+                            isFullscreenEdit = true
+                        } else {
+                            val frame = pages.getOrNull(currentPageIndex)?.frames?.getOrNull(index)
+                            selectedFrameIndex = if (frame?.pageId == null) {
+                                showPagePicker = true
+                                index
+                            } else if (selectedFrameIndex == index) {
+                                null
+                            } else {
+                                index
+                            }
+                        }
+                    },
+                    onFrameChange = { index, frame -> updateFrame(index, frame) },
+                    onFrameClear = { index -> clearFrame(index) },
+                    modifier = Modifier.fillMaxSize()
+                )
 
-            HorizontalDivider()
+                if (!isFullscreenEdit) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(16.dp)
+                            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        Text("Tap Workspace to Expand Full Editing Mode", color = Color.White, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
 
-            CollageBottomDock(
-                activeTab = activeTab,
-                onTabChange = { activeTab = it },
-                selectedTemplate = selectedTemplate,
-                onTemplateChange = { resizeAssignmentsForTemplate(it) },
-                selectedPageSize = selectedPageSize,
-                selectedOrientation = selectedOrientation,
-                onPageSizeChange = { newSize ->
-                    if (hasAnyAssignedPage && newSize != selectedPageSize) {
-                        // Matches the reference editor: changing page size
-                        // after pages are already placed re-derives every
-                        // cell's pixel dimensions, which can shift how each
-                        // page's existing zoom/pan looks — worth a confirm
-                        // rather than silently rearranging what someone just
-                        // spent time positioning.
-                        pendingPageSizeChange = newSize
-                    } else {
-                        selectedPageSize = newSize
+            if (!isFullscreenEdit) {
+                HorizontalDivider()
+                CollageBottomDock(
+                    activeTab = activeTab,
+                    onTabChange = { activeTab = it },
+                    selectedLayout = selectedLayout,
+                    onLayoutChange = { resizePagesForLayout(it) },
+                    selectedPageSize = selectedPageSize,
+                    selectedOrientation = selectedOrientation,
+                    onPageSizeChange = { selectedPageSize = it },
+                    onOrientationToggle = {
+                        selectedOrientation = if (selectedOrientation == CollageOrientation.PORTRAIT) CollageOrientation.LANDSCAPE else CollageOrientation.PORTRAIT
+                    },
+                    onAddPagesClick = { showPagePicker = true }
+                )
+            }
+        }
+    }
+
+    AnimatedVisibility(
+        visible = isFullscreenEdit,
+        enter = fadeIn(),
+        exit = fadeOut()
+    ) {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { isFullscreenEdit = false; selectedFrameIndex = null }) {
+                        Icon(Icons.Filled.FullscreenExit, contentDescription = "Exit Fullscreen")
                     }
-                },
-                onOrientationToggle = {
-                    selectedOrientation = when (selectedOrientation) {
-                        CollageOrientation.PORTRAIT -> CollageOrientation.LANDSCAPE
-                        CollageOrientation.LANDSCAPE -> CollageOrientation.PORTRAIT
+                    Text("CamScanner Workspace Mode", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    IconButton(onClick = { onSaveClick(selectedLayout, selectedPageSize, selectedOrientation, pages) }) {
+                        Icon(Icons.Filled.Check, contentDescription = "Save", tint = MaterialTheme.colorScheme.primary)
                     }
-                },
-                onAddPagesClick = { showPagePicker = true }
-            )
+                }
+
+                CollagePageStrip(
+                    pageCount = pages.size,
+                    currentPageIndex = currentPageIndex,
+                    onPageSelected = { goToPage(it) },
+                    onAddPage = { addBlankPage() }
+                )
+
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    CollagePageCanvas(
+                        page = pages.getOrNull(currentPageIndex) ?: emptyPage(selectedLayout),
+                        pageSize = selectedPageSize,
+                        orientation = selectedOrientation,
+                        pageById = pageById,
+                        selectedFrameIndex = selectedFrameIndex,
+                        isInteractive = true,
+                        onFrameTap = { index ->
+                            val frame = pages.getOrNull(currentPageIndex)?.frames?.getOrNull(index)
+                            selectedFrameIndex = if (frame?.pageId == null) {
+                                showPagePicker = true
+                                index
+                            } else if (selectedFrameIndex == index) {
+                                null
+                            } else {
+                                index
+                            }
+                        },
+                        onFrameChange = { index, frame -> updateFrame(index, frame) },
+                        onFrameClear = { index -> clearFrame(index) },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                HorizontalDivider()
+                CollageBottomDock(
+                    activeTab = activeTab,
+                    onTabChange = { activeTab = it },
+                    selectedLayout = selectedLayout,
+                    onLayoutChange = { resizePagesForLayout(it) },
+                    selectedPageSize = selectedPageSize,
+                    selectedOrientation = selectedOrientation,
+                    onPageSizeChange = { selectedPageSize = it },
+                    onOrientationToggle = {
+                        selectedOrientation = if (selectedOrientation == CollageOrientation.PORTRAIT) CollageOrientation.LANDSCAPE else CollageOrientation.PORTRAIT
+                    },
+                    onAddPagesClick = { showPagePicker = true }
+                )
+            }
         }
     }
 
     if (showPagePicker) {
         PagePickerSheet(
             allPages = allPages,
-            onPickPage = { pageId ->
-                val targetIndex = selectedCellIndex
-                    ?: assignments.indexOfFirst { it.pageId == null }.takeIf { it >= 0 }
-                if (targetIndex != null) {
-                    assignPageToCell(targetIndex, pageId)
-                    selectedCellIndex = targetIndex
-                }
-                showPagePicker = false
-            },
+            onPickPage = { pageId -> assignPickedPage(pageId) },
             onDismiss = { showPagePicker = false }
-        )
-    }
-
-    pendingPageSizeChange?.let { newSize ->
-        AlertDialog(
-            onDismissRequest = { pendingPageSizeChange = null },
-            title = { Text("Change page size?") },
-            text = { Text("If you change the size of the document, the layout will be rearranged. Proceed?") },
-            confirmButton = {
-                TextButton(onClick = {
-                    selectedPageSize = newSize
-                    pendingPageSizeChange = null
-                }) { Text("OK") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingPageSizeChange = null }) { Text("Cancel") }
-            }
         )
     }
 }
 
+/** Small horizontal strip for jumping between output pages and adding new ones. */
+@Composable
+private fun CollagePageStrip(
+    pageCount: Int,
+    currentPageIndex: Int,
+    onPageSelected: (Int) -> Unit,
+    onAddPage: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = { if (currentPageIndex > 0) onPageSelected(currentPageIndex - 1) }, enabled = currentPageIndex > 0) {
+            Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous page")
+        }
+        Text(
+            "Page ${currentPageIndex + 1} of $pageCount",
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.padding(horizontal = 8.dp)
+        )
+        IconButton(onClick = { if (currentPageIndex < pageCount - 1) onPageSelected(currentPageIndex + 1) }, enabled = currentPageIndex < pageCount - 1) {
+            Icon(Icons.Filled.ChevronRight, contentDescription = "Next page")
+        }
+        Spacer(Modifier.width(8.dp))
+        TextButton(onClick = onAddPage) {
+            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("Add page")
+        }
+    }
+}
+
 /**
- * The live, directly-editable collage grid. Each cell is rendered as its own
- * Image with a graphicsLayer scale/translation driven by that cell's
- * transform — dragging updates state synchronously so the resize feels
- * immediate, with no bitmap recompute in the loop.
+ * Renders one output page: the blank canvas plus every picture frame on it,
+ * each freely positioned/sized rather than slotted into a fixed grid cell.
  */
 @Composable
-private fun CollageLiveGrid(
-    template: CollageTemplate,
+private fun CollagePageCanvas(
+    page: CollagePage,
     pageSize: CollagePageSize,
     orientation: CollageOrientation,
-    assignments: List<CollageCellAssignment>,
     pageById: Map<Long, CollagePickerPage>,
-    selectedCellIndex: Int?,
-    onCellTap: (Int) -> Unit,
-    onCellTransformChange: (Int, CollageCellTransform) -> Unit,
-    onCellClear: (Int) -> Unit,
+    selectedFrameIndex: Int?,
+    isInteractive: Boolean,
+    onFrameTap: (Int) -> Unit,
+    onFrameChange: (Int, CollagePictureFrame) -> Unit,
+    onFrameClear: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val pageAspect = if (orientation == CollageOrientation.PORTRAIT) {
@@ -277,43 +410,34 @@ private fun CollageLiveGrid(
     }
 
     Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+        modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
         contentAlignment = Alignment.Center
     ) {
         BoxWithConstraints(
             modifier = Modifier
-                .fillMaxHeight(0.94f)
+                .fillMaxHeight(0.85f)
                 .aspectRatio(pageAspect)
-                .clip(RoundedCornerShape(4.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .background(Color.White)
+                .border(2.dp, MaterialTheme.colorScheme.outlineVariant)
         ) {
             val canvasWidthDp = maxWidth
             val canvasHeightDp = maxHeight
 
-            template.cells.forEachIndexed { index, cell ->
-                val assignment = assignments.getOrNull(index) ?: CollageCellAssignment(pageId = null)
-                val page = assignment.pageId?.let { pageById[it] }
-                val isSelected = selectedCellIndex == index
+            page.frames.forEachIndexed { index, frame ->
+                val picture = frame.pageId?.let { pageById[it] }
+                val isSelected = selectedFrameIndex == index
 
-                val cellWidthDp = (cell.rect.right - cell.rect.left) * canvasWidthDp.value
-                val cellHeightDp = (cell.rect.bottom - cell.rect.top) * canvasHeightDp.value
-                val cellLeftDp = cell.rect.left * canvasWidthDp.value
-                val cellTopDp = cell.rect.top * canvasHeightDp.value
-
-                CollageGridCell(
-                    page = page,
-                    transform = assignment.transform,
+                CollagePictureFrameView(
+                    picture = picture,
+                    frame = frame,
                     isSelected = isSelected,
-                    cellWidthDp = cellWidthDp,
-                    cellHeightDp = cellHeightDp,
-                    onTap = { onCellTap(index) },
-                    onTransformChange = { transform -> onCellTransformChange(index, transform) },
-                    onClear = { onCellClear(index) },
-                    modifier = Modifier
-                        .offset(x = cellLeftDp.dp, y = cellTopDp.dp)
-                        .size(width = cellWidthDp.dp, height = cellHeightDp.dp)
+                    isInteractive = isInteractive,
+                    canvasWidthDp = canvasWidthDp.value,
+                    canvasHeightDp = canvasHeightDp.value,
+                    onTap = { onFrameTap(index) },
+                    onFrameChange = { updated -> onFrameChange(index, updated) },
+                    onClear = { onFrameClear(index) }
                 )
             }
         }
@@ -321,70 +445,80 @@ private fun CollageLiveGrid(
 }
 
 /**
- * One cell of the grid: shows its assigned page (fit-to-cell, then the
- * user's extra scale/pan), or an empty placeholder if unassigned. When
- * selected, overlays the green selection border, a draggable resize handle
- * in the bottom-right corner, and a remove (X) button — mirroring the
- * reference editor's selected-cell treatment.
+ * One picture's draggable, resizable box on the page canvas. When selected
+ * and interactive: dragging the picture body moves it; dragging the
+ * bottom-right handle resizes it (anchored at its own top-left, so resizing
+ * never has the picture jump position out from under your finger).
  */
 @Composable
-private fun CollageGridCell(
-    page: CollagePickerPage?,
-    transform: CollageCellTransform,
+private fun CollagePictureFrameView(
+    picture: CollagePickerPage?,
+    frame: CollagePictureFrame,
     isSelected: Boolean,
-    cellWidthDp: Float,
-    cellHeightDp: Float,
+    isInteractive: Boolean,
+    canvasWidthDp: Float,
+    canvasHeightDp: Float,
     onTap: () -> Unit,
-    onTransformChange: (CollageCellTransform) -> Unit,
-    onClear: () -> Unit,
-    modifier: Modifier = Modifier
+    onFrameChange: (CollagePictureFrame) -> Unit,
+    onClear: () -> Unit
 ) {
     val density = LocalDensity.current
-    val cellWidthPx = with(density) { cellWidthDp.dp.toPx() }
-    val cellHeightPx = with(density) { cellHeightDp.dp.toPx() }
+    val canvasWidthPx = with(density) { canvasWidthDp.dp.toPx() }
+    val canvasHeightPx = with(density) { canvasHeightDp.dp.toPx() }
+
+    val frameLeftDp = frame.xFraction * canvasWidthDp
+    val frameTopDp = frame.yFraction * canvasHeightDp
+    val frameWidthDp = frame.widthFraction * canvasWidthDp
+    val frameHeightDp = frame.heightFraction * canvasHeightDp
 
     Box(
-        modifier = modifier
+        modifier = Modifier
+            .offset(x = frameLeftDp.dp, y = frameTopDp.dp)
+            .size(width = frameWidthDp.dp, height = frameHeightDp.dp)
             .padding(2.dp)
-            .clip(RoundedCornerShape(2.dp))
+            .clip(RoundedCornerShape(4.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
             .clickable(onClick = onTap)
     ) {
-        if (page != null) {
+        if (picture != null) {
+            var dragXFraction by remember(frame.pageId) { mutableStateOf(frame.xFraction) }
+            var dragYFraction by remember(frame.pageId) { mutableStateOf(frame.yFraction) }
+
             Image(
-                painter = rememberAsyncImagePainter(page.uri),
-                contentDescription = page.documentTitle,
+                painter = rememberAsyncImagePainter(picture.uri),
+                contentDescription = picture.documentTitle,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer {
-                        // Lambda form (not the eager-parameter overload) is
-                        // required here, not just preferred — this block runs
-                        // during layout/draw with the layer's own measured
-                        // `size` available, which the eager-parameter
-                        // overload has no access to at all. It also means a
-                        // transform change only triggers relayout/redraw, not
-                        // a full recomposition — meaningfully cheaper for a
-                        // value that changes every frame of a drag gesture.
-                        scaleX = transform.scale
-                        scaleY = transform.scale
-                        translationX = transform.offsetFractionX * cellWidthPx
-                        translationY = transform.offsetFractionY * cellHeightPx
+                    .pointerInput(frame.pageId, isSelected, isInteractive) {
+                        if (isSelected && isInteractive) {
+                            detectDragGestures(
+                                onDragStart = {
+                                    dragXFraction = frame.xFraction
+                                    dragYFraction = frame.yFraction
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    val deltaX = dragAmount.x / canvasWidthPx
+                                    val deltaY = dragAmount.y / canvasHeightPx
+                                    dragXFraction = (dragXFraction + deltaX).coerceIn(0f, 1f - frame.widthFraction)
+                                    dragYFraction = (dragYFraction + deltaY).coerceIn(0f, 1f - frame.heightFraction)
+                                    onFrameChange(frame.copy(xFraction = dragXFraction, yFraction = dragYFraction))
+                                }
+                            )
+                        }
                     }
             )
         }
 
         if (isSelected) {
-            // Selection border
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .border(width = 2.dp, color = MaterialTheme.colorScheme.primary)
             )
 
-            if (page != null) {
-                // Remove (X) — top-start, matching the reference editor's
-                // red circular X in the corner of the selected cell.
+            if (picture != null) {
                 Surface(
                     color = MaterialTheme.colorScheme.error,
                     shape = CircleShape,
@@ -395,92 +529,79 @@ private fun CollageGridCell(
                         .clickable(onClick = onClear)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Filled.Close,
-                            contentDescription = "Remove page",
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
+                        Icon(Icons.Filled.Close, contentDescription = "Remove", tint = Color.White, modifier = Modifier.size(16.dp))
                     }
                 }
 
-                // Resize handle — bottom-end corner, dragging adjusts zoom.
-                // Dragging down-and-right zooms in (matches dragging a corner
-                // "outward" to enlarge, the familiar resize-handle direction).
-                Surface(
-                    color = MaterialTheme.colorScheme.primary,
-                    shape = CircleShape,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(4.dp)
-                        .size(28.dp)
-                        .pointerInput(Unit) {
-                            detectDragGestures { change, dragAmount ->
-                                change.consume()
-                                // Normalize against the CELL's own size, not
-                                // this small handle's pointerInput size (which
-                                // is just the 28dp handle itself) — otherwise
-                                // the same finger movement would zoom by a
-                                // wildly different amount depending on how
-                                // large the cell happens to be on screen.
-                                val cellDiagonalPx = max(cellWidthPx, cellHeightPx)
-                                val delta = (dragAmount.x + dragAmount.y) / cellDiagonalPx
-                                val newScale = (transform.scale + delta).coerceIn(1f, 4f)
-                                onTransformChange(transform.copy(scale = newScale))
+                if (isInteractive) {
+                    var dragWidthFraction by remember(frame.pageId) { mutableStateOf(frame.widthFraction) }
+                    var dragHeightFraction by remember(frame.pageId) { mutableStateOf(frame.heightFraction) }
+
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary,
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(4.dp)
+                            .size(28.dp)
+                            .pointerInput(frame.pageId) {
+                                detectDragGestures(
+                                    onDragStart = {
+                                        dragWidthFraction = frame.widthFraction
+                                        dragHeightFraction = frame.heightFraction
+                                    },
+                                    onDrag = { change, dragAmount ->
+                                        change.consume()
+                                        val deltaWidth = dragAmount.x / canvasWidthPx
+                                        val deltaHeight = dragAmount.y / canvasHeightPx
+
+                                        val maxAllowedWidth = 1f - frame.xFraction
+                                        val maxAllowedHeight = 1f - frame.yFraction
+                                        dragWidthFraction = (dragWidthFraction + deltaWidth).coerceIn(MIN_FRAME_FRACTION, maxAllowedWidth)
+                                        dragHeightFraction = (dragHeightFraction + deltaHeight).coerceIn(MIN_FRAME_FRACTION, maxAllowedHeight)
+
+                                        onFrameChange(frame.copy(widthFraction = dragWidthFraction, heightFraction = dragHeightFraction))
+                                    }
+                                )
                             }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Filled.OpenWith, contentDescription = "Resize", tint = Color.White, modifier = Modifier.size(16.dp))
                         }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Filled.OpenWith,
-                            contentDescription = "Resize",
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
                     }
                 }
             }
-        } else if (page == null) {
+        } else if (picture == null) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Filled.InsertPageBreak,
-                    contentDescription = "Empty — tap to add a page",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                )
+                Icon(Icons.Filled.InsertPageBreak, contentDescription = "Empty", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
             }
         }
     }
 }
 
-/** Bottom dock: Page / Template / Size tabs, matching the reference editor's bottom toolbar. */
 @Composable
 private fun CollageBottomDock(
     activeTab: CollageDockTab,
     onTabChange: (CollageDockTab) -> Unit,
-    selectedTemplate: CollageTemplate,
-    onTemplateChange: (CollageTemplate) -> Unit,
+    selectedLayout: CollageLayout,
+    onLayoutChange: (CollageLayout) -> Unit,
     selectedPageSize: CollagePageSize,
     selectedOrientation: CollageOrientation,
     onPageSizeChange: (CollagePageSize) -> Unit,
     onOrientationToggle: () -> Unit,
     onAddPagesClick: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        // Tab-specific strip, shown above the tab bar itself — same
-        // structure as the reference editor (template/size swatches sit just
-        // above the Page/Template/Size row that selects which strip shows).
+    Column(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
         when (activeTab) {
             CollageDockTab.PAGE -> {
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     TextButton(onClick = onAddPagesClick) {
                         Icon(Icons.Filled.InsertPageBreak, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text("Tap a cell, or tap here to pick a page")
+                        Text("Tap Workspace to Assign Document Pages")
                     }
                 }
             }
@@ -489,11 +610,11 @@ private fun CollageBottomDock(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    rowItems(CollageTemplates.ALL, key = { it.id }) { template ->
+                    rowItems(CollageLayouts.ALL, key = { it.id }) { layout ->
                         FilterChip(
-                            selected = template.id == selectedTemplate.id,
-                            onClick = { onTemplateChange(template) },
-                            label = { Text(template.displayName) }
+                            selected = layout.id == selectedLayout.id,
+                            onClick = { onLayoutChange(layout) },
+                            label = { Text(layout.displayName) }
                         )
                     }
                 }
@@ -503,7 +624,7 @@ private fun CollageBottomDock(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    rowItems(CollagePageSize.entries.toList(), key = { it.name }) { size ->
+                    rowItems(CollagePageSize.values().toList(), key = { it.name }) { size ->
                         FilterChip(
                             selected = size == selectedPageSize,
                             onClick = { onPageSizeChange(size) },
@@ -516,10 +637,7 @@ private fun CollageBottomDock(
                             onClick = onOrientationToggle,
                             leadingIcon = {
                                 Icon(
-                                    if (selectedOrientation == CollageOrientation.PORTRAIT)
-                                        Icons.Filled.CropPortrait
-                                    else
-                                        Icons.Filled.CropLandscape,
+                                    if (selectedOrientation == CollageOrientation.PORTRAIT) Icons.Filled.CropPortrait else Icons.Filled.CropLandscape,
                                     contentDescription = null,
                                     modifier = Modifier.size(18.dp)
                                 )
@@ -535,26 +653,23 @@ private fun CollageBottomDock(
 
         HorizontalDivider()
 
-        // The tab bar itself — Page / Template / Size, matching the reference
-        // editor's bottom row (its 4th tab, Add Watermark, is intentionally
-        // out of scope here).
         Row(modifier = Modifier.fillMaxWidth()) {
             DockTabButton(
-                label = "Page",
+                label = "Page Pool",
                 icon = Icons.Filled.InsertPageBreak,
                 selected = activeTab == CollageDockTab.PAGE,
                 onClick = { onTabChange(CollageDockTab.PAGE) },
                 modifier = Modifier.weight(1f)
             )
             DockTabButton(
-                label = "Template",
+                label = "Layout",
                 icon = Icons.Filled.ViewModule,
                 selected = activeTab == CollageDockTab.TEMPLATE,
                 onClick = { onTabChange(CollageDockTab.TEMPLATE) },
                 modifier = Modifier.weight(1f)
             )
             DockTabButton(
-                label = "Size",
+                label = "Dimensions",
                 icon = Icons.Filled.PhotoSizeSelectActual,
                 selected = activeTab == CollageDockTab.SIZE,
                 onClick = { onTabChange(CollageDockTab.SIZE) },
@@ -574,9 +689,7 @@ private fun DockTabButton(
 ) {
     val tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
     Column(
-        modifier = modifier
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
+        modifier = modifier.clickable(onClick = onClick).padding(vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Icon(icon, contentDescription = label, tint = tint)
@@ -585,8 +698,6 @@ private fun DockTabButton(
     }
 }
 
-/** Full-screen page picker bottom sheet — picking a page assigns it to the currently selected (or first empty) cell. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PagePickerSheet(
     allPages: List<CollagePickerPage>,
@@ -595,18 +706,11 @@ private fun PagePickerSheet(
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(modifier = Modifier.fillMaxHeight(0.85f)) {
-            Text(
-                "Pick a page",
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(16.dp)
-            )
+            Text("Pick a library scan entry", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(16.dp))
 
             if (allPages.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "No scanned pages yet",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text("No scanned pages yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
                 LazyVerticalGrid(
@@ -640,16 +744,19 @@ private fun PickerThumbnail(page: CollagePickerPage, onClick: () -> Unit) {
             modifier = Modifier.fillMaxSize()
         )
         Surface(
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+            color = Color.Black.copy(alpha = 0.65f),
             shape = RoundedCornerShape(4.dp),
             modifier = Modifier.padding(4.dp).align(Alignment.BottomStart)
         ) {
             Text(
                 page.documentTitle,
                 style = MaterialTheme.typography.labelSmall,
+                color = Color.White,
                 maxLines = 1,
-                modifier = Modifier.padding(horizontal = 4.dp)
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
             )
         }
     }
 }
+
+private enum class CollageDockTab { PAGE, TEMPLATE, SIZE }
