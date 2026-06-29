@@ -27,6 +27,7 @@ import com.example.scanapp.ui.ExportUiState
 import com.example.scanapp.ui.HomeScreen
 import com.example.scanapp.ui.RecentDocument
 import com.example.scanapp.ui.ScanScreen
+import com.example.scanapp.ui.SizeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -56,6 +57,15 @@ class MainActivity : ComponentActivity() {
     private var updateStatus by mutableStateOf(com.example.scanapp.ui.UpdateCheckUiStatus.IDLE)
     private var updateStatusMessage by mutableStateOf<String?>(null)
     private var latestReleaseUrl by mutableStateOf<String?>(null)
+
+    // Export screen's customization state, hoisted here (rather than living
+    // inside ScanScreen's own `remember`) so it survives leaving and
+    // re-entering the export screen — e.g. size limit, unit, and filename
+    // used to silently reset every time this screen was recomposed fresh.
+    private var exportUiState by mutableStateOf(ExportUiState())
+    private var exportUseSizeLimit by mutableStateOf(true)
+    private var exportSizeUnit by mutableStateOf(SizeUnit.KB)
+    private var exportSizeText by mutableStateOf("500")
 
     // Currently-open document (DETAIL screen).
     private var openDocumentId by mutableStateOf<Long?>(null)
@@ -124,7 +134,7 @@ class MainActivity : ComponentActivity() {
                     sortBy = homeSortBy,
                     sortDirection = homeSortDirection,
                     onSortChange = { sortBy, direction -> onHomeSortChange(sortBy, direction) },
-                    onMeClick = { currentScreen = Screen.SETTINGS },
+                    onSettingsClick = { currentScreen = Screen.SETTINGS },
                     onToolsClick = { openCollageScreen() }
                 )
                 Screen.DETAIL -> {
@@ -143,7 +153,8 @@ class MainActivity : ComponentActivity() {
                             onPageClick = { page -> launchPageEditViaMlKit(documentId, page) },
                             onAddPagesClick = { launchAddPagesScan(documentId) },
                             onDeletePage = { page -> deletePageFromOpenDocument(documentId, page) },
-                            onReorder = { orderedIds -> reorderOpenDocumentPages(documentId, orderedIds) }
+                            onReorder = { orderedIds -> reorderOpenDocumentPages(documentId, orderedIds) },
+                            onExportSelected = { selectedPages -> openExportScreenForSelectedPages(selectedPages) }
                         )
                     }
                 }
@@ -155,6 +166,16 @@ class MainActivity : ComponentActivity() {
                     onExportClick = { uiState -> runExport(uiState) },
                     onBackClick = {
                         currentScreen = if (openDocumentId != null) Screen.DETAIL else Screen.HOME
+                    },
+                    initialUiState = exportUiState,
+                    initialUseSizeLimit = exportUseSizeLimit,
+                    initialSizeUnit = exportSizeUnit,
+                    initialSizeText = exportSizeText,
+                    onExportUiStateChange = { uiState, useSizeLimit, sizeUnit, sizeText ->
+                        exportUiState = uiState
+                        exportUseSizeLimit = useSizeLimit
+                        exportSizeUnit = sizeUnit
+                        exportSizeText = sizeText
                     }
                 )
                 Screen.SETTINGS -> com.example.scanapp.ui.SettingsScreen(
@@ -252,17 +273,25 @@ class MainActivity : ComponentActivity() {
         if (uris.isEmpty()) return
         when (val pending = pendingScan) {
             is PendingScan.NewDocument -> {
+                // Switch to the export screen and populate its pages FIRST, and
+                // synchronously (no suspension point before this happens). The
+                // detail-viewer fields (openDocumentId / refreshOpenDocument) are
+                // only needed in case the user later backs out of export into
+                // Detail, so they're updated afterward, off the critical path.
+                // Previously these were set in the other order, which left a
+                // window where openDocumentId had already flipped non-null
+                // while currentScreen hadn't caught up yet — long enough for
+                // the Detail viewer to flash on screen before Export appeared.
+                scannedPages = uris
+                exportResultText = null
+                currentScreen = Screen.SCAN_EXPORT
+
                 lifecycleScope.launch {
                     val title = "Scan ${SimpleDateFormat("MM-dd-yyyy HH.mm", Locale.getDefault()).format(Date())}"
                     val documentId = repository.saveNewDocument(uris, title)
                     repository.touchAccessed(documentId)
                     openDocumentId = documentId
                     refreshOpenDocument(documentId)
-                    // Skip the detail viewer — go directly to export so the user
-                    // isn't forced through an extra screen after every scan.
-                    scannedPages = uris
-                    exportResultText = null
-                    currentScreen = Screen.SCAN_EXPORT
                 }
             }
             is PendingScan.AddPages -> {
@@ -462,6 +491,17 @@ class MainActivity : ComponentActivity() {
         currentScreen = Screen.SCAN_EXPORT
     }
 
+    /**
+     * Detail screen's multi-select "Export selected" action: same export flow
+     * as the full-document export, but scoped to only the pages the user
+     * checked off, in their current (possibly reordered) display order.
+     */
+    private fun openExportScreenForSelectedPages(selectedPages: List<DetailPage>) {
+        scannedPages = selectedPages.map { it.uri }
+        exportResultText = null
+        currentScreen = Screen.SCAN_EXPORT
+    }
+
     /** Rename/delete from the Home screen's long-press menu — delegates to the ID-based versions. */
     private fun renameDocument(doc: RecentDocument, newTitle: String) {
         val documentId = doc.id.toLongOrNull() ?: return
@@ -482,7 +522,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Triggered from the Settings ("Me") screen's "Check for update" row. */
+    /** Triggered from the Settings screen's "Check for update" row. */
     private fun checkForUpdate() {
         updateStatus = com.example.scanapp.ui.UpdateCheckUiStatus.CHECKING
         updateStatusMessage = null
