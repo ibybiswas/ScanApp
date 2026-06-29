@@ -73,6 +73,19 @@ fun DocumentDetailScreen(
     }
 
     Scaffold(
+        floatingActionButton = {
+            if (selectionMode) {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        val selectedObjects = pages.filter { it.pageId in selectedPages }
+                        onExportSelected(selectedObjects)
+                    },
+                    icon = { Icon(Icons.Filled.FileDownload, contentDescription = null) },
+                    text = { Text("Export selected (${selectedPages.size})") }
+                )
+            }
+        },
+        floatingActionButtonPosition = FabPosition.End,
         topBar = {
             TopAppBar(
                 title = {
@@ -95,14 +108,7 @@ fun DocumentDetailScreen(
                     }
                 },
                 actions = {
-                    if (selectionMode) {
-                        IconButton(onClick = {
-                            val selectedObjects = pages.filter { it.pageId in selectedPages }
-                            onExportSelected(selectedObjects)
-                        }) {
-                            Icon(Icons.Filled.FileDownload, contentDescription = "Export Selected")
-                        }
-                    } else {
+                    if (!selectionMode) {
                         IconButton(onClick = { showRenameDialog = true }) {
                             Icon(Icons.Filled.Edit, contentDescription = "Rename")
                         }
