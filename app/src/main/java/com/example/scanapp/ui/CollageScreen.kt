@@ -50,14 +50,6 @@ import com.example.scanapp.collage.CollageTemplate
 import com.example.scanapp.collage.CollageTemplates
 import kotlin.math.max
 
-data class CollagePickerPage(
-    val pageId: Long,
-    val uri: Uri,
-    val documentTitle: String
-)
-
-private enum class CollageDockTab { PAGE, TEMPLATE, SIZE }
-
 @Composable
 fun CollageScreen(
     allPages: List<CollagePickerPage>,
@@ -225,7 +217,7 @@ fun CollageScreen(
                     }
                     Text("CamScanner Workspace Mode", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                     IconButton(onClick = { onSaveClick(selectedTemplate, selectedPageSize, selectedOrientation, assignments) }) {
-                        Icon(Icons.Filled.Check, contentDescription = "Save", tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Filled.Check, tint = MaterialTheme.colorScheme.primary)
                     }
                 }
 
@@ -379,6 +371,21 @@ private fun CollageGridCell(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
+                    .pointerInput(isSelected) {
+                        if (isSelected) {
+                            detectDragGestures { change, dragAmount ->
+                                change.consume()
+                                val deltaPanX = dragAmount.x / cellWidthPx
+                                val deltaPanY = dragAmount.y / cellHeightPx
+                                onTransformChange(
+                                    transform.copy(
+                                        offsetFractionX = (transform.offsetFractionX + deltaPanX).coerceIn(-1f, 1f),
+                                        offsetFractionY = (transform.offsetFractionY + deltaPanY).coerceIn(-1f, 1f)
+                                    )
+                                )
+                            }
+                        }
+                    }
                     .graphicsLayer {
                         scaleX = transform.scale
                         scaleY = transform.scale
@@ -423,22 +430,12 @@ private fun CollageGridCell(
                                 val cellDiagonalPx = max(cellWidthPx, cellHeightPx)
                                 val deltaScale = (dragAmount.x + dragAmount.y) / cellDiagonalPx
                                 val newScale = (transform.scale + deltaScale).coerceIn(1f, 4f)
-                                
-                                val deltaPanX = dragAmount.x / cellWidthPx
-                                val deltaPanY = dragAmount.y / cellHeightPx
-                                
-                                onTransformChange(
-                                    transform.copy(
-                                        scale = newScale,
-                                        offsetFractionX = (transform.offsetFractionX + deltaPanX).coerceIn(-1f, 1f),
-                                        offsetFractionY = (transform.offsetFractionY + deltaPanY).coerceIn(-1f, 1f)
-                                    )
-                                )
+                                onTransformChange(transform.copy(scale = newScale))
                             }
                         }
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Filled.OpenWith, contentDescription = "Resize/Pan", tint = Color.White, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Filled.OpenWith, contentDescription = "Resize", tint = Color.White, modifier = Modifier.size(16.dp))
                     }
                 }
             }
@@ -506,7 +503,7 @@ private fun CollageBottomDock(
                         FilterChip(
                             selected = false,
                             onClick = onOrientationToggle,
-                            leadingIcon = {
+                            leading = {
                                 Icon(
                                     if (selectedOrientation == CollageOrientation.PORTRAIT) Icons.Filled.CropPortrait else Icons.Filled.CropLandscape,
                                     contentDescription = null,
