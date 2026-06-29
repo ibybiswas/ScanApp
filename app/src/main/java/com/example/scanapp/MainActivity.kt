@@ -390,7 +390,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             try {
                 val pageUris = withContext(Dispatchers.IO) {
-                    com.example.scanapp.scan.PdfImporter.importPagesAsJpegs(applicationContext, uri)
+                    com.example.scanapp.scan.PdfImporter.importPagesAsJpegs(this@MainActivity, uri)
                 }
 
                 val title = pdfDisplayNameOrNull(uri)
@@ -406,7 +406,7 @@ class MainActivity : ComponentActivity() {
             } finally {
                 isImportingPdf = false
                 withContext(Dispatchers.IO) {
-                    com.example.scanapp.scan.PdfImporter.cleanupScratchFiles(applicationContext)
+                    com.example.scanapp.scan.PdfImporter.cleanupScratchFiles(this@MainActivity)
                 }
             }
         }
