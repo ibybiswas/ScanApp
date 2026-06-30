@@ -178,6 +178,7 @@ object BackupEngine {
 
             File(context.filesDir, "scans").deleteRecursively()
 
+            var entriesRestored = 0
             ZipInputStream(BufferedInputStream(FileInputStream(tempZip))).use { zis ->
                 var entry = zis.nextEntry
                 while (entry != null) {
@@ -195,14 +196,36 @@ object BackupEngine {
                         destFile.parentFile?.mkdirs()
                         destFile.outputStream().use { zis.copyTo(it) }
                     }
+                    entriesRestored++
                     zis.closeEntry()
                     entry = zis.nextEntry
                 }
+            }
+
+            if (entriesRestored == 0) {
+                throw IOException(
+                    "Backup archive was empty or unreadable — likely wrong passphrase, " +
+                        "or this file isn't a ScanApp backup"
+                )
             }
         } finally {
             rawCopy.delete()
             tempZip.delete()
         }
+    }
+
+    /** Reads exactly [size] bytes from [stream], throwing if the stream ends early. InputStream.read(buffer) is not guaranteed to fill the buffer in one call. */
+    private fun readExactly(stream: InputStream, size: Int): ByteArray {
+        val buffer = ByteArray(size)
+        var totalRead = 0
+        while (totalRead < size) {
+            val read = stream.read(buffer, totalRead, size - totalRead)
+            if (read == -1) {
+                throw IOException("Backup file is truncated or not a valid ScanApp backup (expected $size header bytes, got $totalRead)")
+            }
+            totalRead += read
+        }
+        return buffer
     }
 
     private fun encryptFile(inputFile: File, outputFile: File, password: CharSequence) {
@@ -227,8 +250,8 @@ object BackupEngine {
 
     private fun decryptFile(inputFile: File, outputFile: File, password: CharSequence) {
         FileInputStream(inputFile).use { fis ->
-            val salt = ByteArray(16).also { fis.read(it) }
-            val iv = ByteArray(16).also { fis.read(it) }
+            val salt = readExactly(fis, 16)
+            val iv = readExactly(fis, 16)
 
             val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA1")
             val spec = PBEKeySpec(password.toString().toCharArray(), salt, ITERATIONS, KEY_LENGTH)
