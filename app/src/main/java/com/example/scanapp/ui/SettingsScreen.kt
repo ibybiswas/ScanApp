@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalUriHandler
@@ -230,14 +231,20 @@ private fun SectionLabel(text: String) {
 }
 
 /**
- * Credit line shown in the Developer section: "This app is Developed by Bony Biswas".
+ * Credit shown in the Developer section: just the name "Bony Biswas", rendered
+ * with a faux-3D extruded look (stacked offset layers giving it depth/a
+ * raised, embossed feel) in gold, plus a little original cartoon mascot that
+ * shoves the words into place.
  *
  * "Bony" and "Biswas" both start off-screen at the extreme right, as if shoved
  * in from outside the screen. They slam inward past their final resting
  * spot, overlap/collide with each other near the middle, bounce off that
  * collision a couple of times (decreasing each bounce, like they're
- * scuffling), then settle into their final positions. The whole sequence
- * runs over a deliberately long window so the collision reads clearly.
+ * scuffling), then settle into their final positions. The mascot trails
+ * "Biswas" the whole way, leaning into the push with a strained grin,
+ * squashing on every impact, then takes a little victory hop and scoots
+ * off-screen once the words are settled. The whole sequence runs over a
+ * deliberately long window so the gag reads clearly.
  */
 @Composable
 private fun DeveloperCreditLine() {
@@ -245,6 +252,10 @@ private fun DeveloperCreditLine() {
     // word's final settled position. Large positive = far off-screen right.
     val bonyOffset = remember { Animatable(900f) }
     val biswasOffset = remember { Animatable(900f) }
+    val mascotOffset = remember { Animatable(1300f) }
+    val mascotRotation = remember { Animatable(0f) }
+    val mascotSquash = remember { Animatable(1f) }
+    val mascotAlpha = remember { Animatable(1f) }
 
     LaunchedEffect(Unit) {
         launch {
@@ -277,45 +288,236 @@ private fun DeveloperCreditLine() {
                 }
             )
         }
+        // Mascot trails just behind "Biswas", arriving a beat later and
+        // leaning into every shove, then exits once the job's done.
+        launch {
+            mascotOffset.animateTo(
+                targetValue = 400f,
+                animationSpec = keyframes {
+                    durationMillis = 4300
+                    1300f at 0 using LinearOutSlowInEasing
+                    90f at 950 using FastOutLinearInEasing
+                    130f at 1550 using FastOutSlowInEasing
+                    80f at 2100 using FastOutSlowInEasing
+                    110f at 2600 using FastOutSlowInEasing
+                    90f at 2950 using FastOutSlowInEasing
+                    70f at 3200 using FastOutSlowInEasing
+                    60f at 3700 using FastOutSlowInEasing
+                    400f at 4300 using FastOutSlowInEasing
+                }
+            )
+        }
+        launch {
+            mascotRotation.animateTo(
+                targetValue = 0f,
+                animationSpec = keyframes {
+                    durationMillis = 4300
+                    0f at 0
+                    -22f at 950   // leans hard into the first shove
+                    12f at 1550
+                    -18f at 2100
+                    8f at 2600
+                    -10f at 2950
+                    0f at 3200
+                    0f at 3700
+                    18f at 4300   // tips back, scooting off
+                }
+            )
+        }
+        launch {
+            mascotSquash.animateTo(
+                targetValue = 1f,
+                animationSpec = keyframes {
+                    durationMillis = 4300
+                    1f at 0
+                    0.7f at 950    // squish on impact
+                    1.05f at 1100
+                    0.78f at 1550
+                    1.05f at 1700
+                    0.8f at 2100
+                    1f at 2300
+                    0.82f at 2600
+                    1f at 2950
+                    1f at 3200
+                    1.2f at 3450   // little victory hop stretch
+                    1f at 3700
+                    1f at 4300
+                }
+            )
+        }
+        launch {
+            mascotAlpha.animateTo(
+                targetValue = 0f,
+                animationSpec = keyframes {
+                    durationMillis = 4300
+                    1f at 0
+                    1f at 3700
+                    0f at 4300   // fades out as it scoots off after the push
+                }
+            )
+        }
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
-        Text(
-            text = "This app is Developed by",
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Bold,
-            fontSize = 18.sp,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Spacer(Modifier.height(2.dp))
         Row {
-            Text(
+            Extruded3DText(
                 text = "Bony",
-                fontWeight = FontWeight.ExtraBold,
-                fontStyle = FontStyle.Italic,
-                fontSize = 22.sp,
-                color = GoldColor,
                 modifier = Modifier.offset(x = bonyOffset.value.dp)
             )
-            Spacer(Modifier.width(8.dp))
-            Text(
+            Spacer(Modifier.width(10.dp))
+            Extruded3DText(
                 text = "Biswas",
-                fontWeight = FontWeight.ExtraBold,
-                fontStyle = FontStyle.Italic,
-                fontSize = 22.sp,
-                color = GoldColor,
                 modifier = Modifier.offset(x = biswasOffset.value.dp)
             )
         }
+        PushyMascot(
+            modifier = Modifier
+                .align(androidx.compose.ui.Alignment.CenterStart)
+                .offset(x = mascotOffset.value.dp)
+                .graphicsLayer {
+                    rotationZ = mascotRotation.value
+                    scaleX = 2f - mascotSquash.value
+                    scaleY = mascotSquash.value
+                    alpha = mascotAlpha.value
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f)
+                }
+        )
+    }
+}
+
+/**
+ * A small original cartoon mascot — round body, big effort-squinted eyes,
+ * a gritted-teeth grin, one arm braced out front mid-shove, and a sweat
+ * drop for comic effect. Drawn entirely with Canvas primitives; this is an
+ * original character design, not a depiction of any existing copyrighted
+ * character.
+ */
+@Composable
+private fun PushyMascot(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier.size(50.dp)) {
+        val w = size.width
+        val h = size.height
+
+        // Body — round, peachy-orange, leaning into the push.
+        drawOval(
+            color = Color(0xFFFF8A4C),
+            topLeft = androidx.compose.ui.geometry.Offset(w * 0.18f, h * 0.16f),
+            size = androidx.compose.ui.geometry.Size(w * 0.64f, h * 0.74f)
+        )
+
+        // Stubby legs.
+        drawOval(
+            color = Color(0xFFE56F2E),
+            topLeft = androidx.compose.ui.geometry.Offset(w * 0.26f, h * 0.82f),
+            size = androidx.compose.ui.geometry.Size(w * 0.18f, h * 0.16f)
+        )
+        drawOval(
+            color = Color(0xFFE56F2E),
+            topLeft = androidx.compose.ui.geometry.Offset(w * 0.52f, h * 0.82f),
+            size = androidx.compose.ui.geometry.Size(w * 0.18f, h * 0.16f)
+        )
+
+        // Bracing arm out front, with a little fist — this is the "push".
+        drawLine(
+            color = Color(0xFFE56F2E),
+            start = androidx.compose.ui.geometry.Offset(w * 0.74f, h * 0.55f),
+            end = androidx.compose.ui.geometry.Offset(w * 1.02f, h * 0.50f),
+            strokeWidth = w * 0.10f,
+            cap = androidx.compose.ui.graphics.StrokeCap.Round
+        )
+        drawCircle(
+            color = Color(0xFFFF8A4C),
+            radius = w * 0.09f,
+            center = androidx.compose.ui.geometry.Offset(w * 1.04f, h * 0.49f)
+        )
+
+        // Eyes — wide white sclera, dark pupils, furrowed brows for effort.
+        val eyeY = h * 0.38f
+        listOf(w * 0.36f, w * 0.58f).forEach { eyeX ->
+            drawCircle(color = Color.White, radius = w * 0.11f, center = androidx.compose.ui.geometry.Offset(eyeX, eyeY))
+            drawCircle(color = Color(0xFF2B2B2B), radius = w * 0.05f, center = androidx.compose.ui.geometry.Offset(eyeX + w * 0.01f, eyeY))
+            drawLine(
+                color = Color(0xFF7A3E12),
+                start = androidx.compose.ui.geometry.Offset(eyeX - w * 0.10f, eyeY - h * 0.13f),
+                end = androidx.compose.ui.geometry.Offset(eyeX + w * 0.10f, eyeY - h * 0.07f),
+                strokeWidth = w * 0.035f,
+                cap = androidx.compose.ui.graphics.StrokeCap.Round
+            )
+        }
+
+        // Gritted-teeth grin — strained effort smile.
+        drawRoundRect(
+            color = Color(0xFF5A2E0C),
+            topLeft = androidx.compose.ui.geometry.Offset(w * 0.34f, h * 0.58f),
+            size = androidx.compose.ui.geometry.Size(w * 0.32f, h * 0.10f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.05f, w * 0.05f)
+        )
+        drawRoundRect(
+            color = Color.White,
+            topLeft = androidx.compose.ui.geometry.Offset(w * 0.36f, h * 0.585f),
+            size = androidx.compose.ui.geometry.Size(w * 0.28f, h * 0.05f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.03f, w * 0.03f)
+        )
+
+        // Sweat drop — sells the effort.
+        drawOval(
+            color = Color(0xFF6EC6FF),
+            topLeft = androidx.compose.ui.geometry.Offset(w * 0.08f, h * 0.22f),
+            size = androidx.compose.ui.geometry.Size(w * 0.10f, h * 0.16f)
+        )
+    }
+}
+
+/**
+ * Draws [text] with a faux-3D extruded/embossed look: several copies of the
+ * glyph are stacked behind the front-facing layer, each nudged one pixel
+ * further down-right and shaded progressively darker, so it reads as a
+ * raised gold block letter rather than flat text. No real 3D rendering is
+ * involved — it's the standard "layered shadow stack" trick for faux depth
+ * in a 2D UI.
+ */
+@Composable
+private fun Extruded3DText(text: String, modifier: Modifier = Modifier) {
+    val depth = 6
+    Box(modifier = modifier) {
+        for (i in depth downTo 1) {
+            Text(
+                text = text,
+                fontWeight = FontWeight.ExtraBold,
+                fontStyle = FontStyle.Italic,
+                fontSize = 22.sp,
+                color = GoldShadeDark.copy(alpha = 1f - (i * 0.06f)),
+                modifier = Modifier.offset(x = i.dp, y = i.dp)
+            )
+        }
+        // Front face with a subtle highlight-to-base gradient for a polished,
+        // raised-metal look, plus a soft drop shadow for separation.
+        Text(
+            text = text,
+            fontWeight = FontWeight.ExtraBold,
+            fontStyle = FontStyle.Italic,
+            fontSize = 22.sp,
+            color = GoldColor,
+            style = LocalTextStyle.current.copy(
+                shadow = androidx.compose.ui.graphics.Shadow(
+                    color = Color.Black.copy(alpha = 0.35f),
+                    offset = androidx.compose.ui.geometry.Offset(2f, 2f),
+                    blurRadius = 3f
+                )
+            )
+        )
     }
 }
 
 /** Metallic gold used for the developer credit name — reads clearly on a light surface. */
 private val GoldColor = Color(0xFFCC9A06)
+
+/** Darker gold used for the extruded "depth" layers behind the front face. */
+private val GoldShadeDark = Color(0xFF7A5C04)
 
 /** Developer contact rows: Telegram (inline link) and GitHub profile (inline link). */
 @Composable
