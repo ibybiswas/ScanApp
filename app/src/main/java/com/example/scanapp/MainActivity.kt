@@ -293,7 +293,10 @@ class MainActivity : ComponentActivity() {
                             autoInstallUpdates = enabled
                             com.example.scanapp.update.UpdatePreferences.setAutoInstallEnabled(applicationContext, enabled)
                         },
-                        onBackClick = { currentScreen = Screen.HOME }
+                        onBackClick = { currentScreen = Screen.HOME },
+                        onHomeClick = { currentScreen = Screen.HOME },
+                        onToolsClick = { openCollageScreen() },
+                        onBackupClick = { currentScreen = Screen.BACKUP }
                     )
                     Screen.COLLAGE -> com.example.scanapp.ui.CollageScreen(
                         allPages = collagePickerPages,
@@ -308,7 +311,10 @@ class MainActivity : ComponentActivity() {
                         statusMessage = backupStatusMessage,
                         onLocalBackup = { password -> runLocalBackup(password) },
                         onLocalRestore = { password -> runLocalRestore(password) },
-                        onTelegramSync = { token, chatId, password -> runTelegramSync(token, chatId, password) }
+                        onTelegramSync = { token, chatId, password -> runTelegramSync(token, chatId, password) },
+                        onHomeClick = { currentScreen = Screen.HOME },
+                        onToolsClick = { openCollageScreen() },
+                        onSettingsClick = { currentScreen = Screen.SETTINGS }
                     )
                 }
 
