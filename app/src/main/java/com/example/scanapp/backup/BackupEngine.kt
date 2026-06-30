@@ -31,6 +31,27 @@ object BackupEngine {
     private const val KEY_LENGTH = 256
     private const val PREFS_NAME = "backup_rotation_prefs"
     private const val KEY_LAST_MSG_ID = "last_msg_id"
+    private const val KEY_LAST_FILE_ID = "last_file_id"
+    private const val KEY_BOT_TOKEN = "telegram_bot_token"
+    private const val KEY_CHAT_ID = "telegram_chat_id"
+
+    /** Persists the Telegram credentials so they survive app restarts. */
+    fun saveTelegramCredentials(context: Context, token: String, chatId: String) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_BOT_TOKEN, token)
+            .putString(KEY_CHAT_ID, chatId)
+            .apply()
+    }
+
+    /** Returns the saved (token, chatId) pair, each empty if not yet set. */
+    fun getTelegramCredentials(context: Context): Pair<String, String> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return Pair(
+            prefs.getString(KEY_BOT_TOKEN, "") ?: "",
+            prefs.getString(KEY_CHAT_ID, "") ?: ""
+        )
+    }
 
     /** Public subfolder name under Downloads where local backups are saved/visible. */
     private const val BACKUP_SUBDIR = "ScanApp"
@@ -330,9 +351,22 @@ object BackupEngine {
                     end++
                 }
                 val newMsgId = response.substring(start, end).trim()
-                
-                // Store the new message identifier node
-                prefs.edit().putString(KEY_LAST_MSG_ID, newMsgId).apply()
+
+                // Also capture the document's file_id so a later restore can
+                // ask Telegram for a fresh download link via getFile.
+                val fileIdMarker = "\"document\":{\"file_id\":\""
+                var newFileId: String? = null
+                if (response.contains(fileIdMarker)) {
+                    val fStart = response.indexOf(fileIdMarker) + fileIdMarker.length
+                    val fEnd = response.indexOf('"', fStart)
+                    if (fEnd > fStart) newFileId = response.substring(fStart, fEnd)
+                }
+
+                // Store the new message/file identifiers
+                prefs.edit()
+                    .putString(KEY_LAST_MSG_ID, newMsgId)
+                    .apply { if (newFileId != null) putString(KEY_LAST_FILE_ID, newFileId) }
+                    .apply()
 
                 // Delete the old backup if it exists to maintain standard rotation limits
                 if (!lastMsgId.isNullOrBlank()) {
@@ -347,6 +381,64 @@ object BackupEngine {
         } else {
             val error = connection.errorStream?.bufferedReader()?.use { it.readText() }
             throw IOException("Telegram Server Error (HTTP $status): $error")
+        }
+    }
+
+    /**
+     * Downloads the most recently uploaded backup file from Telegram (using the
+     * file_id captured during the last successful upload) and restores it in place.
+     */
+    fun downloadFromTelegramAndRestore(context: Context, token: String, password: String?) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val fileId = prefs.getString(KEY_LAST_FILE_ID, null)
+            ?: throw IOException("No Telegram backup found to restore. Run an upload first.")
+
+        // Step 1: ask Telegram for the file's download path
+        val getFileUrl = URL("https://api.telegram.org/bot$token/getFile?file_id=$fileId")
+        val getFileConnection = (getFileUrl.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 10000
+            readTimeout = 10000
+        }
+
+        val getFileStatus = getFileConnection.responseCode
+        if (getFileStatus != HttpURLConnection.HTTP_OK) {
+            val error = getFileConnection.errorStream?.bufferedReader()?.use { it.readText() }
+            throw IOException("Telegram Server Error (HTTP $getFileStatus): $error")
+        }
+
+        val getFileResponse = getFileConnection.inputStream.bufferedReader().use { it.readText() }
+        val pathMarker = "\"file_path\":\""
+        if (!getFileResponse.contains(pathMarker)) {
+            throw IOException("Telegram response did not include a file_path")
+        }
+        val pStart = getFileResponse.indexOf(pathMarker) + pathMarker.length
+        val pEnd = getFileResponse.indexOf('"', pStart)
+        val filePath = getFileResponse.substring(pStart, pEnd)
+
+        // Step 2: download the actual file bytes
+        val downloadUrl = URL("https://api.telegram.org/file/bot$token/$filePath")
+        val downloadConnection = (downloadUrl.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 15000
+            readTimeout = 30000
+        }
+
+        val downloadStatus = downloadConnection.responseCode
+        if (downloadStatus != HttpURLConnection.HTTP_OK) {
+            val error = downloadConnection.errorStream?.bufferedReader()?.use { it.readText() }
+            throw IOException("Telegram Server Error (HTTP $downloadStatus): $error")
+        }
+
+        val tempFile = File(context.cacheDir, "scanapp_tg_restore.enc")
+        downloadConnection.inputStream.use { input ->
+            FileOutputStream(tempFile).use { output -> input.copyTo(output) }
+        }
+
+        try {
+            restoreBackup(context, tempFile, password)
+        } finally {
+            tempFile.delete()
         }
     }
 
