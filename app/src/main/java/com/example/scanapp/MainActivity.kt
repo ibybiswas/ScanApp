@@ -101,6 +101,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var pdfImportLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>
     private lateinit var restoreBackupLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>
     private var pendingRestorePassword: String = ""
+    private lateinit var importTelegramCredsLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>
+    private var pendingImportCredsPassword: String = ""
     private val exportEngine by lazy { ExportEngine(applicationContext) }
     private lateinit var repository: DocumentRepository
 
@@ -187,6 +189,16 @@ class MainActivity : ComponentActivity() {
         ) { uri ->
             if (uri != null) {
                 runLocalRestore(uri, pendingRestorePassword)
+            } else {
+                isBackupActive = false
+            }
+        }
+
+        importTelegramCredsLauncher = registerForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+        ) { uri ->
+            if (uri != null) {
+                runImportTelegramCredentials(uri, pendingImportCredsPassword)
             } else {
                 isBackupActive = false
             }
@@ -320,6 +332,8 @@ class MainActivity : ComponentActivity() {
                         onSaveTelegramCredentials = { token, chatId ->
                             com.example.scanapp.backup.BackupEngine.saveTelegramCredentials(applicationContext, token, chatId)
                         },
+                        onExportTelegramCredentials = { password -> runExportTelegramCredentials(password) },
+                        onImportTelegramCredentials = { password -> runImportTelegramCredentials(password) },
                         onHomeClick = { currentScreen = Screen.HOME },
                         onToolsClick = { openCollageScreen() },
                         onSettingsClick = { currentScreen = Screen.SETTINGS }
@@ -839,6 +853,65 @@ class MainActivity : ComponentActivity() {
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     backupStatusMessage = "Telegram restore failed: ${e.message}"
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isBackupActive = false
+                }
+            }
+        }
+    }
+
+    /** Encrypts the saved bot token + chat ID and writes them to Downloads/ScanApp. */
+    private fun runExportTelegramCredentials(password: String) {
+        if (isBackupActive) return
+        isBackupActive = true
+        backupStatusMessage = "Exporting Telegram credentials..."
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val (token, chatId) = com.example.scanapp.backup.BackupEngine.getTelegramCredentials(applicationContext)
+                val location = com.example.scanapp.backup.BackupEngine.exportTelegramCredentialsToDownloads(
+                    applicationContext, token, chatId, password
+                )
+                withContext(Dispatchers.Main) {
+                    backupStatusMessage = "Credentials exported to $location"
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    backupStatusMessage = "Credentials export failed: ${e.message}"
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isBackupActive = false
+                }
+            }
+        }
+    }
+
+    /** Entry point from the Backup screen's "Import credentials from file" button: opens a file picker. */
+    private fun runImportTelegramCredentials(password: String) {
+        if (isBackupActive) return
+        isBackupActive = true
+        pendingImportCredsPassword = password
+        backupStatusMessage = "Choose a credentials file to import..."
+        importTelegramCredsLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+    }
+
+    /** Actual import once the user has picked a credentials file via SAF. */
+    private fun runImportTelegramCredentials(sourceUri: Uri, password: String) {
+        backupStatusMessage = "Importing Telegram credentials..."
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val (token, chatId) = com.example.scanapp.backup.BackupEngine.importTelegramCredentialsFromUri(
+                    applicationContext, sourceUri, password
+                )
+                com.example.scanapp.backup.BackupEngine.saveTelegramCredentials(applicationContext, token, chatId)
+                withContext(Dispatchers.Main) {
+                    backupStatusMessage = "Credentials imported"
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    backupStatusMessage = "Credentials import failed: ${e.message}"
                 }
             } finally {
                 withContext(Dispatchers.Main) {
