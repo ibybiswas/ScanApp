@@ -12,6 +12,8 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,6 +34,7 @@ fun BackupScreen(
     onTelegramSync: (token: String, chat: String, pass: String) -> Unit
 ) {
     var password by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
     var botToken by remember { mutableStateOf("") }
     var chatId by remember { mutableStateOf("") }
     val scrollState = rememberScrollState()
@@ -67,8 +70,20 @@ fun BackupScreen(
                     value = password,
                     onValueChange = { password = it },
                     label = { Text("AES-256 Bit Passphrase") },
-                    visualTransformation = PasswordVisualTransformation(),
+                    visualTransformation = if (passwordVisible) {
+                        androidx.compose.ui.text.input.VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                imageVector = if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = if (passwordVisible) "Hide passphrase" else "Show passphrase"
+                            )
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
