@@ -1,5 +1,9 @@
 package com.example.scanapp.ui
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -7,7 +11,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.NewReleases
@@ -16,11 +19,14 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /** What the update-check row should currently show. */
 enum class UpdateCheckUiStatus { IDLE, CHECKING, UP_TO_DATE, UPDATE_AVAILABLE, ERROR }
@@ -165,6 +171,8 @@ fun SettingsScreen(
                 leadingContent = { Icon(Icons.Filled.Info, contentDescription = null) }
             )
 
+            DeveloperCreditLine()
+
             // Check Updates on Start — silently checks GitHub Releases once
             // at launch and shows the standard "update available" popup if
             // a newer release is found, independent of this row's own
@@ -201,25 +209,6 @@ fun SettingsScreen(
             HorizontalDivider()
             Spacer(Modifier.height(8.dp))
 
-            SectionLabel("Coming soon")
-            Spacer(Modifier.height(4.dp))
-
-            // Placeholder for the upcoming Telegram-based cloud sync feature.
-            // Non-interactive for now — just reserves the spot in the menu
-            // and sets expectations until the real feature is wired up.
-            ListItem(
-                headlineContent = { Text("Telegram cloud sync") },
-                supportingContent = { Text("Back up and sync your scans via Telegram — coming soon") },
-                leadingContent = { Icon(Icons.Filled.CloudQueue, contentDescription = null) },
-                trailingContent = {
-                    AssistChip(onClick = {}, enabled = false, label = { Text("Soon") })
-                }
-            )
-
-            Spacer(Modifier.height(8.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(8.dp))
-
             SectionLabel("Developer")
             Spacer(Modifier.height(4.dp))
 
@@ -236,6 +225,71 @@ private fun SectionLabel(text: String) {
         color = MaterialTheme.colorScheme.primary,
         fontWeight = FontWeight.Bold
     )
+}
+
+/**
+ * Credit line shown under the Version row: "This app is Developed by Bony Biswas".
+ * The name "Bony Biswas" is styled distinctly from the rest of the sentence
+ * (different color, weight, italic) and animates in — "Bony" slides in from
+ * the left and "Biswas" slides in from the right, both fading in, then
+ * settle into place on first composition.
+ */
+@Composable
+private fun DeveloperCreditLine() {
+    var animate by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { animate = true }
+
+    val travel = 90.dp
+    val leftOffset by animateFloatAsState(
+        targetValue = if (animate) 0f else -1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "bonyOffset"
+    )
+    val rightOffset by animateFloatAsState(
+        targetValue = if (animate) 0f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "biswasOffset"
+    )
+    val nameAlpha by animateFloatAsState(
+        targetValue = if (animate) 1f else 0f,
+        animationSpec = tween(durationMillis = 450),
+        label = "nameAlpha"
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+    ) {
+        Text(
+            text = "This app is Developed by ",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = "Bony",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.ExtraBold,
+            fontStyle = FontStyle.Italic,
+            fontSize = 17.sp,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .alpha(nameAlpha)
+                .offset(x = travel * leftOffset)
+        )
+        Text(
+            text = " Biswas",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.ExtraBold,
+            fontStyle = FontStyle.Italic,
+            fontSize = 17.sp,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .alpha(nameAlpha)
+                .offset(x = travel * rightOffset)
+        )
+    }
 }
 
 /** Developer contact rows: Telegram (inline link) and GitHub profile (inline link). */
