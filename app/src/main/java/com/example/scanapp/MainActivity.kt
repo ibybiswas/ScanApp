@@ -306,16 +306,25 @@ class MainActivity : ComponentActivity() {
                             saveCollageAsNewDocument(layout, pageSize, orientation, pages)
                         }
                     )
-                    Screen.BACKUP -> com.example.scanapp.ui.BackupScreen(
+                Screen.BACKUP -> {
+                    val savedTelegramCreds = com.example.scanapp.backup.BackupEngine.getTelegramCredentials(applicationContext)
+                    com.example.scanapp.ui.BackupScreen(
                         isProcessing = isBackupActive,
                         statusMessage = backupStatusMessage,
+                        savedBotToken = savedTelegramCreds.first,
+                        savedChatId = savedTelegramCreds.second,
                         onLocalBackup = { password -> runLocalBackup(password) },
                         onLocalRestore = { password -> runLocalRestore(password) },
                         onTelegramSync = { token, chatId, password -> runTelegramSync(token, chatId, password) },
+                        onTelegramRestore = { token, password -> runTelegramRestore(token, password) },
+                        onSaveTelegramCredentials = { token, chatId ->
+                            com.example.scanapp.backup.BackupEngine.saveTelegramCredentials(applicationContext, token, chatId)
+                        },
                         onHomeClick = { currentScreen = Screen.HOME },
                         onToolsClick = { openCollageScreen() },
                         onSettingsClick = { currentScreen = Screen.SETTINGS }
                     )
+                }
                 }
 
                 if (showUpdateAvailableDialog) {
@@ -800,6 +809,36 @@ class MainActivity : ComponentActivity() {
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     backupStatusMessage = "Upload failed: ${e.message}"
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isBackupActive = false
+                }
+            }
+        }
+    }
+
+    private fun runTelegramRestore(token: String, password: String) {
+        if (isBackupActive) return
+        isBackupActive = true
+        backupStatusMessage = "Downloading backup from Telegram..."
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                com.example.scanapp.backup.BackupEngine.downloadFromTelegramAndRestore(
+                    applicationContext, token, password.ifBlank { null }
+                )
+                // Same reasoning as the local restore path: rebuild the Room
+                // connection so the UI doesn't observe stale/merged state.
+                repository = DocumentRepository(applicationContext)
+                withContext(Dispatchers.Main) {
+                    backupStatusMessage = "Restore from Telegram complete"
+                    openDocumentId = null
+                    currentScreen = Screen.HOME
+                }
+                observeLibrary()
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    backupStatusMessage = "Telegram restore failed: ${e.message}"
                 }
             } finally {
                 withContext(Dispatchers.Main) {
