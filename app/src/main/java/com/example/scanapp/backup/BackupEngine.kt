@@ -354,12 +354,22 @@ object BackupEngine {
 
                 // Also capture the document's file_id so a later restore can
                 // ask Telegram for a fresh download link via getFile.
-                val fileIdMarker = "\"document\":{\"file_id\":\""
+                // NOTE: Telegram's JSON does not guarantee "file_id" is the
+                // first key inside "document":{...} (it's typically preceded
+                // by "file_name" and "mime_type"), so we locate the
+                // "document" object first and then search for "file_id"
+                // anywhere within it rather than assuming a fixed key order.
                 var newFileId: String? = null
-                if (response.contains(fileIdMarker)) {
-                    val fStart = response.indexOf(fileIdMarker) + fileIdMarker.length
-                    val fEnd = response.indexOf('"', fStart)
-                    if (fEnd > fStart) newFileId = response.substring(fStart, fEnd)
+                val documentMarker = "\"document\":{"
+                val docStart = response.indexOf(documentMarker)
+                if (docStart != -1) {
+                    val fileIdKey = "\"file_id\":\""
+                    val fStart = response.indexOf(fileIdKey, docStart)
+                    if (fStart != -1) {
+                        val valueStart = fStart + fileIdKey.length
+                        val fEnd = response.indexOf('"', valueStart)
+                        if (fEnd > valueStart) newFileId = response.substring(valueStart, fEnd)
+                    }
                 }
 
                 // Store the new message/file identifiers
