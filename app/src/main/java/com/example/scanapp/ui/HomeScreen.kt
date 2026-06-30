@@ -66,7 +66,8 @@ fun HomeScreen(
     sortDirection: SortDirection = SortDirection.DESCENDING,
     onSortChange: (DocumentSortBy, SortDirection) -> Unit = { _, _ -> },
     onSettingsClick: () -> Unit = {},
-    onToolsClick: () -> Unit = {}
+    onToolsClick: () -> Unit = {},
+    onBackupClick: () -> Unit = {}
 ) {
     var actionSheetTarget by remember { mutableStateOf<RecentDocument?>(null) }
     var renameTarget by remember { mutableStateOf<RecentDocument?>(null) }
@@ -128,7 +129,7 @@ fun HomeScreen(
             }
         },
         bottomBar = {
-            ScanAppBottomNav(onSettingsClick = onSettingsClick, onToolsClick = onToolsClick)
+            ScanAppBottomNav(onSettingsClick = onSettingsClick, onToolsClick = onToolsClick, onBackupClick = onBackupClick)
         },
         floatingActionButton = {
             if (!selectionMode) {
@@ -459,7 +460,7 @@ private fun EmptyRecentsState(modifier: Modifier = Modifier, isSearching: Boolea
 }
 
 @Composable
-private fun ScanAppBottomNav(onSettingsClick: () -> Unit = {}, onToolsClick: () -> Unit = {}) {
+private fun ScanAppBottomNav(onSettingsClick: () -> Unit = {}, onToolsClick: () -> Unit = {}, onBackupClick: () -> Unit = {}) {
     var selected by remember { mutableStateOf(0) }
     val items = listOf(
         Triple("Home", Icons.Filled.Home, 0),
@@ -482,6 +483,7 @@ private fun ScanAppBottomNav(onSettingsClick: () -> Unit = {}, onToolsClick: () 
                 onClick = {
                     when (index) {
                         1 -> onToolsClick()
+                        2 -> onBackupClick()
                         3 -> onSettingsClick()
                         else -> selected = index
                     }
