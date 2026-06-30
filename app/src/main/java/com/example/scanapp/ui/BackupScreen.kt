@@ -29,17 +29,24 @@ import androidx.compose.ui.unit.dp
 fun BackupScreen(
     isProcessing: Boolean,
     statusMessage: String?,
+    savedBotToken: String = "",
+    savedChatId: String = "",
     onLocalBackup: (password: String) -> Unit,
     onLocalRestore: (password: String) -> Unit,
     onTelegramSync: (token: String, chat: String, pass: String) -> Unit,
+    onTelegramRestore: (token: String, pass: String) -> Unit,
+    onSaveTelegramCredentials: (token: String, chat: String) -> Unit = { _, _ -> },
     onHomeClick: () -> Unit = {},
     onToolsClick: () -> Unit = {},
     onSettingsClick: () -> Unit = {}
 ) {
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
-    var botToken by remember { mutableStateOf("") }
-    var chatId by remember { mutableStateOf("") }
+    var botToken by remember { mutableStateOf(savedBotToken) }
+    var chatId by remember { mutableStateOf(savedChatId) }
+    // Credentials fields are hidden by default once a token/chat ID is already
+    // saved; the user must explicitly tap "Change credentials" to reveal them.
+    var credentialsEditing by remember { mutableStateOf(savedBotToken.isBlank() && savedChatId.isBlank()) }
     val scrollState = rememberScrollState()
     val context = LocalContext.current
 
@@ -154,22 +161,51 @@ fun BackupScreen(
                     Text("1. Create Bot via @BotFather")
                 }
 
-                OutlinedTextField(
-                    value = botToken,
-                    onValueChange = { botToken = it },
-                    label = { Text("Paste Telegram Bot Token") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = chatId,
-                    onValueChange = { chatId = it },
-                    label = { Text("Paste Target Private Channel ID") },
-                    placeholder = { Text("e.g. -100123456789") },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                if (credentialsEditing) {
+                    OutlinedTextField(
+                        value = botToken,
+                        onValueChange = { botToken = it },
+                        label = { Text("Paste Telegram Bot Token") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = chatId,
+                        onValueChange = { chatId = it },
+                        label = { Text("Paste Target Private Channel ID") },
+                        placeholder = { Text("e.g. -100123456789") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Button(
+                        onClick = {
+                            if (botToken.isNotBlank() && chatId.isNotBlank()) {
+                                credentialsEditing = false
+                                onSaveTelegramCredentials(botToken, chatId)
+                            }
+                        },
+                        enabled = botToken.isNotBlank() && chatId.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Save credentials")
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("Bot token saved", style = MaterialTheme.typography.bodyMedium)
+                            Text("Chat ID: $chatId", style = MaterialTheme.typography.bodySmall)
+                        }
+                        OutlinedButton(onClick = { credentialsEditing = true }) {
+                            Text("Change credentials")
+                        }
+                    }
+                }
+
                 Button(
                     onClick = { onTelegramSync(botToken, chatId, password) },
-                    enabled = !isProcessing && botToken.isNotBlank() && chatId.isNotBlank(),
+                    enabled = !isProcessing && botToken.isNotBlank() && chatId.isNotBlank() && !credentialsEditing,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     if (isProcessing) {
@@ -177,6 +213,13 @@ fun BackupScreen(
                     } else {
                         Text("2. Run Clean Rotation Sync")
                     }
+                }
+                OutlinedButton(
+                    onClick = { onTelegramRestore(botToken, password) },
+                    enabled = !isProcessing && botToken.isNotBlank() && !credentialsEditing,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Restore from Telegram")
                 }
             }
         }
