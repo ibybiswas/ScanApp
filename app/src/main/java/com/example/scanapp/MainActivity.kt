@@ -102,7 +102,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var restoreBackupLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>
     private var pendingRestorePassword: String = ""
     private val exportEngine by lazy { ExportEngine(applicationContext) }
-    private var repository = DocumentRepository(applicationContext)
+    private lateinit var repository: DocumentRepository
 
     private var currentScreen by mutableStateOf(Screen.HOME)
     private var scannedPages by mutableStateOf<List<Uri>>(emptyList())
@@ -152,6 +152,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        repository = DocumentRepository(applicationContext)
 
         checkUpdatesOnStart = com.example.scanapp.update.UpdatePreferences.isCheckOnStartEnabled(applicationContext)
         autoInstallUpdates = com.example.scanapp.update.UpdatePreferences.isAutoInstallEnabled(applicationContext)
