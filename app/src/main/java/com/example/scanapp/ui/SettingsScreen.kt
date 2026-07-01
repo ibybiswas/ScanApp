@@ -3,8 +3,13 @@ package com.example.scanapp.ui
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -21,8 +26,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalUriHandler
@@ -235,18 +238,17 @@ private fun SectionLabel(text: String) {
 /**
  * Credit shown in the Developer section: just the name "Bony Biswas", rendered
  * with a faux-3D extruded look (stacked offset layers giving it depth/a
- * raised, embossed feel) in gold, plus a little original cartoon mascot that
- * shoves the words into place.
+ * raised, embossed feel) in gold, plus a little original silhouette
+ * character that moonwalks in alongside it.
  *
- * "Bony" and "Biswas" both start off-screen at the extreme right, as if shoved
- * in from outside the screen. They slam inward past their final resting
- * spot, overlap/collide with each other near the middle, bounce off that
- * collision a couple of times (decreasing each bounce, like they're
- * scuffling), then settle into their final positions. The mascot trails
- * "Biswas" the whole way, leaning into the push with a strained grin,
- * squashing on every impact, then takes a little victory hop and scoots
- * off-screen once the words are settled. The whole sequence runs over a
- * deliberately long window so the gag reads clearly.
+ * "Bony" and "Biswas" both start off-screen at the extreme right at the very
+ * same instant the moonwalker starts its glide — that's the sync point: the
+ * moment the animation begins, both the text and the dancer are already
+ * moving together. The words slam past their resting spot into a
+ * mid-air collision, bounce off it a couple of times (like they're
+ * scuffling), then settle. The moonwalker glides in on its own step cycle,
+ * hangs around grooving in place near the settled text, then moonwalks back
+ * off-screen and fades out.
  */
 @Composable
 private fun DeveloperCreditLine() {
@@ -254,12 +256,13 @@ private fun DeveloperCreditLine() {
     // word's final settled position. Large positive = far off-screen right.
     val bonyOffset = remember { Animatable(900f) }
     val biswasOffset = remember { Animatable(900f) }
-    val mascotOffset = remember { Animatable(1300f) }
-    val mascotRotation = remember { Animatable(0f) }
-    val mascotSquash = remember { Animatable(1f) }
-    val mascotAlpha = remember { Animatable(1f) }
+    val moonwalkOffset = remember { Animatable(700f) }
+    val moonwalkAlpha = remember { Animatable(1f) }
 
     LaunchedEffect(Unit) {
+        // All three launches start in the same LaunchedEffect frame, so the
+        // moonwalker and both words begin sliding in from the right at
+        // exactly the same instant.
         launch {
             bonyOffset.animateTo(
                 targetValue = 0f,
@@ -290,71 +293,29 @@ private fun DeveloperCreditLine() {
                 }
             )
         }
-        // Mascot trails just behind "Biswas", arriving a beat later and
-        // leaning into every shove, then exits once the job's done.
+        // Moonwalker: glides in from the right (starting at the same t=0 as
+        // the words above), settles near the text, grooves in place for a
+        // beat, then moonwalks back off-screen to the left and fades.
         launch {
-            mascotOffset.animateTo(
-                targetValue = 400f,
+            moonwalkOffset.animateTo(
+                targetValue = -500f,
                 animationSpec = keyframes {
                     durationMillis = 4300
-                    1300f at 0 using LinearOutSlowInEasing
-                    90f at 950 using FastOutLinearInEasing
-                    130f at 1550 using FastOutSlowInEasing
-                    80f at 2100 using FastOutSlowInEasing
-                    110f at 2600 using FastOutSlowInEasing
-                    90f at 2950 using FastOutSlowInEasing
-                    70f at 3200 using FastOutSlowInEasing
-                    60f at 3700 using FastOutSlowInEasing
-                    400f at 4300 using FastOutSlowInEasing
+                    700f at 0 using LinearOutSlowInEasing
+                    0f at 1400 using FastOutSlowInEasing
+                    0f at 3400 using LinearEasing              // hangs around, grooving on the spot
+                    -500f at 4300 using FastOutSlowInEasing    // moonwalks off-screen
                 }
             )
         }
         launch {
-            mascotRotation.animateTo(
-                targetValue = 0f,
-                animationSpec = keyframes {
-                    durationMillis = 4300
-                    0f at 0
-                    -22f at 950   // leans hard into the first shove
-                    12f at 1550
-                    -18f at 2100
-                    8f at 2600
-                    -10f at 2950
-                    0f at 3200
-                    0f at 3700
-                    18f at 4300   // tips back, scooting off
-                }
-            )
-        }
-        launch {
-            mascotSquash.animateTo(
-                targetValue = 1f,
-                animationSpec = keyframes {
-                    durationMillis = 4300
-                    1f at 0
-                    0.7f at 950    // squish on impact
-                    1.05f at 1100
-                    0.78f at 1550
-                    1.05f at 1700
-                    0.8f at 2100
-                    1f at 2300
-                    0.82f at 2600
-                    1f at 2950
-                    1f at 3200
-                    1.2f at 3450   // little victory hop stretch
-                    1f at 3700
-                    1f at 4300
-                }
-            )
-        }
-        launch {
-            mascotAlpha.animateTo(
+            moonwalkAlpha.animateTo(
                 targetValue = 0f,
                 animationSpec = keyframes {
                     durationMillis = 4300
                     1f at 0
-                    1f at 3700
-                    0f at 4300   // fades out as it scoots off after the push
+                    1f at 3900
+                    0f at 4300   // fades out as it exits
                 }
             )
         }
@@ -376,97 +337,116 @@ private fun DeveloperCreditLine() {
                 modifier = Modifier.offset(x = biswasOffset.value.dp)
             )
         }
-        PushyMascot(
+        MoonwalkerSilhouette(
             modifier = Modifier
                 .align(androidx.compose.ui.Alignment.CenterStart)
-                .offset(x = mascotOffset.value.dp)
-                .rotate(mascotRotation.value)
-                .scale(scaleX = 2f - mascotSquash.value, scaleY = mascotSquash.value)
-                .alpha(mascotAlpha.value)
+                .offset(x = moonwalkOffset.value.dp)
+                .alpha(moonwalkAlpha.value)
         )
     }
 }
 
 /**
- * A small original cartoon mascot — round body, big effort-squinted eyes,
- * a gritted-teeth grin, one arm braced out front mid-shove, and a sweat
- * drop for comic effect. Drawn entirely with Canvas primitives; this is an
- * original character design, not a depiction of any existing copyrighted
- * character.
+ * A small original silhouette character doing a moonwalk-style step cycle:
+ * one leg planted forward with the heel down while the other trails behind
+ * up on its toe, swapping continuously — the classic illusion of walking
+ * forward while actually gliding. One arm is bent up near the chest, the
+ * other trails back, and the whole figure has a slight bounce to sell the
+ * groove. Drawn entirely with Canvas primitives as an original character
+ * design — not a reproduction of any existing footage or artwork.
  */
 @Composable
-private fun PushyMascot(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier.size(50.dp)) {
+private fun MoonwalkerSilhouette(modifier: Modifier = Modifier) {
+    val infinite = rememberInfiniteTransition(label = "moonwalkCycle")
+    // Drives which leg is "forward, heel down" vs "trailing, up on toe",
+    // continuously swapping — the stepping motion of the glide.
+    val stepPhase by infinite.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 520, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "stepPhase"
+    )
+    // Tiny up-down bounce on each step for a bit of groove.
+    val bob by infinite.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 260, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "bob"
+    )
+
+    Canvas(modifier = modifier.size(40.dp, 56.dp)) {
         val w = size.width
         val h = size.height
+        val silhouette = Color(0xFF1C1C1C)
+        val liftY = bob * (h * 0.02f)
 
-        // Body — round, peachy-orange, leaning into the push.
-        drawOval(
-            color = Color(0xFFFF8A4C),
-            topLeft = androidx.compose.ui.geometry.Offset(w * 0.18f, h * 0.16f),
-            size = androidx.compose.ui.geometry.Size(w * 0.64f, h * 0.74f)
+        // Head
+        drawCircle(
+            color = silhouette,
+            radius = w * 0.17f,
+            center = androidx.compose.ui.geometry.Offset(w * 0.52f, h * 0.13f - liftY)
         )
 
-        // Stubby legs.
-        drawOval(
-            color = Color(0xFFE56F2E),
-            topLeft = androidx.compose.ui.geometry.Offset(w * 0.26f, h * 0.82f),
-            size = androidx.compose.ui.geometry.Size(w * 0.18f, h * 0.16f)
-        )
-        drawOval(
-            color = Color(0xFFE56F2E),
-            topLeft = androidx.compose.ui.geometry.Offset(w * 0.52f, h * 0.82f),
-            size = androidx.compose.ui.geometry.Size(w * 0.18f, h * 0.16f)
-        )
-
-        // Bracing arm out front, with a little fist — this is the "push".
+        // Torso — slight backward lean sells the glide.
         drawLine(
-            color = Color(0xFFE56F2E),
-            start = androidx.compose.ui.geometry.Offset(w * 0.74f, h * 0.55f),
-            end = androidx.compose.ui.geometry.Offset(w * 1.02f, h * 0.50f),
-            strokeWidth = w * 0.10f,
+            color = silhouette,
+            start = androidx.compose.ui.geometry.Offset(w * 0.52f, h * 0.24f - liftY),
+            end = androidx.compose.ui.geometry.Offset(w * 0.46f, h * 0.56f - liftY),
+            strokeWidth = w * 0.16f,
             cap = androidx.compose.ui.graphics.StrokeCap.Round
         )
-        drawCircle(
-            color = Color(0xFFFF8A4C),
-            radius = w * 0.09f,
-            center = androidx.compose.ui.geometry.Offset(w * 1.04f, h * 0.49f)
+
+        // Bent arm up near the chest (the classic pose), other arm trailing back.
+        drawLine(
+            color = silhouette,
+            start = androidx.compose.ui.geometry.Offset(w * 0.50f, h * 0.30f - liftY),
+            end = androidx.compose.ui.geometry.Offset(w * 0.22f, h * 0.20f - liftY),
+            strokeWidth = w * 0.08f,
+            cap = androidx.compose.ui.graphics.StrokeCap.Round
+        )
+        drawLine(
+            color = silhouette,
+            start = androidx.compose.ui.geometry.Offset(w * 0.48f, h * 0.34f - liftY),
+            end = androidx.compose.ui.geometry.Offset(w * 0.72f, h * 0.48f - liftY),
+            strokeWidth = w * 0.08f,
+            cap = androidx.compose.ui.graphics.StrokeCap.Round
         )
 
-        // Eyes — wide white sclera, dark pupils, furrowed brows for effort.
-        val eyeY = h * 0.38f
-        listOf(w * 0.36f, w * 0.58f).forEach { eyeX ->
-            drawCircle(color = Color.White, radius = w * 0.11f, center = androidx.compose.ui.geometry.Offset(eyeX, eyeY))
-            drawCircle(color = Color(0xFF2B2B2B), radius = w * 0.05f, center = androidx.compose.ui.geometry.Offset(eyeX + w * 0.01f, eyeY))
-            drawLine(
-                color = Color(0xFF7A3E12),
-                start = androidx.compose.ui.geometry.Offset(eyeX - w * 0.10f, eyeY - h * 0.13f),
-                end = androidx.compose.ui.geometry.Offset(eyeX + w * 0.10f, eyeY - h * 0.07f),
-                strokeWidth = w * 0.035f,
-                cap = androidx.compose.ui.graphics.StrokeCap.Round
-            )
-        }
+        // Legs — alternate which one is planted forward (heel down) versus
+        // trailing behind (heel lifted, dragging on the toe), swapping every
+        // cycle as they slide sideways past each other.
+        val frontIsLeft = stepPhase < 0.5f
+        val cyclePos = if (frontIsLeft) stepPhase * 2f else (stepPhase - 0.5f) * 2f
 
-        // Gritted-teeth grin — strained effort smile.
-        drawRoundRect(
-            color = Color(0xFF5A2E0C),
-            topLeft = androidx.compose.ui.geometry.Offset(w * 0.34f, h * 0.58f),
-            size = androidx.compose.ui.geometry.Size(w * 0.32f, h * 0.10f),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.05f, w * 0.05f)
-        )
-        drawRoundRect(
-            color = Color.White,
-            topLeft = androidx.compose.ui.geometry.Offset(w * 0.36f, h * 0.585f),
-            size = androidx.compose.ui.geometry.Size(w * 0.28f, h * 0.05f),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.03f, w * 0.03f)
-        )
+        val forwardKneeX = w * (0.40f - 0.10f * cyclePos)
+        val forwardFootX = w * (0.28f - 0.16f * cyclePos)
+        val trailingKneeX = w * (0.54f + 0.10f * cyclePos)
+        val trailingFootX = w * (0.68f + 0.18f * cyclePos)
+        val trailingHeelLift = h * 0.05f * (1f - cyclePos)
 
-        // Sweat drop — sells the effort.
-        drawOval(
-            color = Color(0xFF6EC6FF),
-            topLeft = androidx.compose.ui.geometry.Offset(w * 0.08f, h * 0.22f),
-            size = androidx.compose.ui.geometry.Size(w * 0.10f, h * 0.16f)
-        )
+        val hipY = h * 0.56f - liftY
+        val kneeY = h * 0.78f - liftY
+        val footY = h * 0.97f - liftY
+
+        val leftKneeX = if (frontIsLeft) forwardKneeX else trailingKneeX
+        val leftFootX = if (frontIsLeft) forwardFootX else trailingFootX
+        val leftFootY = if (frontIsLeft) footY else footY - trailingHeelLift
+
+        val rightKneeX = if (frontIsLeft) trailingKneeX else forwardKneeX
+        val rightFootX = if (frontIsLeft) trailingFootX else forwardFootX
+        val rightFootY = if (frontIsLeft) footY - trailingHeelLift else footY
+
+        val hipPoint = androidx.compose.ui.geometry.Offset(w * 0.48f, hipY)
+        drawLine(silhouette, hipPoint, androidx.compose.ui.geometry.Offset(leftKneeX, kneeY), strokeWidth = w * 0.09f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        drawLine(silhouette, androidx.compose.ui.geometry.Offset(leftKneeX, kneeY), androidx.compose.ui.geometry.Offset(leftFootX, leftFootY), strokeWidth = w * 0.09f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        drawLine(silhouette, hipPoint, androidx.compose.ui.geometry.Offset(rightKneeX, kneeY), strokeWidth = w * 0.09f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        drawLine(silhouette, androidx.compose.ui.geometry.Offset(rightKneeX, kneeY), androidx.compose.ui.geometry.Offset(rightFootX, rightFootY), strokeWidth = w * 0.09f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
     }
 }
 
