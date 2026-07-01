@@ -270,7 +270,7 @@ private fun DeveloperCreditLine() {
     val smokePhase by fxTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(durationMillis = 1100, easing = LinearEasing)),
+        animationSpec = infiniteRepeatable(tween(durationMillis = 1500, easing = LinearEasing)),
         label = "smokePhase"
     )
     val firePhase by fxTransition.animateFloat(
@@ -284,11 +284,11 @@ private fun DeveloperCreditLine() {
         progress.animateTo(
             targetValue = 1f,
             animationSpec = keyframes {
-                durationMillis = 1900
+                durationMillis = 3200
                 0f at 0 using LinearOutSlowInEasing
-                1.08f at 1300 using FastOutSlowInEasing   // yanked in fast, overshoots the resting spot
-                0.96f at 1550 using FastOutSlowInEasing    // rebounds back
-                1f at 1900 using FastOutSlowInEasing       // settles
+                1.08f at 2200 using FastOutSlowInEasing   // yanked in fast, overshoots the resting spot
+                0.96f at 2650 using FastOutSlowInEasing    // rebounds back
+                1f at 3200 using FastOutSlowInEasing       // settles
             }
         )
         // Rope lets go once the text has settled — truck drives on alone
@@ -297,17 +297,17 @@ private fun DeveloperCreditLine() {
             launch {
                 truckExit.animateTo(
                     targetValue = 650f,
-                    animationSpec = tween(durationMillis = 1300, easing = FastOutSlowInEasing)
+                    animationSpec = tween(durationMillis = 2200, easing = FastOutSlowInEasing)
                 )
             }
             launch {
                 truckExitAlpha.animateTo(
                     targetValue = 0f,
                     animationSpec = keyframes {
-                        durationMillis = 1300
+                        durationMillis = 2200
                         1f at 0
-                        1f at 900
-                        0f at 1300   // fades out in the final stretch as it drives off
+                        1f at 1600
+                        0f at 2200   // fades out in the final stretch as it drives off
                     }
                 )
             }
@@ -340,7 +340,7 @@ private fun DeveloperCreditLine() {
     ) {
         if (showTruck) {
             Canvas(modifier = Modifier.matchParentSize()) {
-                val ropeAlpha = (1f - (truckExit.value / 40f)).coerceIn(0f, 1f)
+                val ropeAlpha = (1f - (truckExit.value / 70f)).coerceIn(0f, 1f)
                 val groundY = size.height * 0.86f
 
                 // Rope/chain between the truck's back (its trailing/right
