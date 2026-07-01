@@ -30,7 +30,6 @@ import androidx.compose.material.icons.filled.CropPortrait
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.InsertPageBreak
 import androidx.compose.material.icons.filled.OpenWith
-import androidx.compose.material.icons.filled.PhotoSizeSelectActual
 import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -82,7 +81,10 @@ fun CollageScreen(
         pageSize: CollagePageSize,
         orientation: CollageOrientation,
         pages: List<CollagePage>
-    ) -> Unit
+    ) -> Unit,
+    onHomeClick: () -> Unit = {},
+    onSettingsClick: () -> Unit = {},
+    onBackupClick: () -> Unit = {}
 ) {
     var selectedLayout by remember { mutableStateOf(CollageLayouts.ALL.first()) }
     var selectedPageSize by remember { mutableStateOf(CollagePageSize.A4) }
@@ -202,6 +204,17 @@ fun CollageScreen(
                             }
                         }
                     }
+                )
+            }
+        },
+        bottomBar = {
+            if (!isFullscreenEdit) {
+                ScanAppBottomNav(
+                    selectedIndex = 1,
+                    onHomeClick = onHomeClick,
+                    onToolsClick = {},
+                    onBackupClick = onBackupClick,
+                    onSettingsClick = onSettingsClick
                 )
             }
         }
@@ -415,7 +428,7 @@ private fun CollagePageCanvas(
     ) {
         BoxWithConstraints(
             modifier = Modifier
-                .fillMaxHeight(0.85f)
+                .fillMaxSize(0.97f)
                 .aspectRatio(pageAspect)
                 .clip(RoundedCornerShape(8.dp))
                 .background(Color.White)
@@ -656,24 +669,31 @@ private fun CollageBottomDock(
         Row(modifier = Modifier.fillMaxWidth()) {
             DockTabButton(
                 label = "Page Pool",
-                icon = Icons.Filled.InsertPageBreak,
                 selected = activeTab == CollageDockTab.PAGE,
                 onClick = { onTabChange(CollageDockTab.PAGE) },
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                icon = { tint -> Icon(Icons.Filled.InsertPageBreak, contentDescription = "Page Pool", tint = tint) }
             )
             DockTabButton(
                 label = "Layout",
-                icon = Icons.Filled.ViewModule,
                 selected = activeTab == CollageDockTab.TEMPLATE,
                 onClick = { onTabChange(CollageDockTab.TEMPLATE) },
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                icon = { tint -> Icon(Icons.Filled.ViewModule, contentDescription = "Layout", tint = tint) }
             )
             DockTabButton(
                 label = "Dimensions",
-                icon = Icons.Filled.PhotoSizeSelectActual,
                 selected = activeTab == CollageDockTab.SIZE,
                 onClick = { onTabChange(CollageDockTab.SIZE) },
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                icon = { tint ->
+                    Text(
+                        "A4",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = tint
+                    )
+                }
             )
         }
     }
@@ -682,17 +702,17 @@ private fun CollageBottomDock(
 @Composable
 private fun DockTabButton(
     label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
     selected: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    icon: @Composable (Color) -> Unit
 ) {
     val tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
     Column(
         modifier = modifier.clickable(onClick = onClick).padding(vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Icon(icon, contentDescription = label, tint = tint)
+        icon(tint)
         Spacer(Modifier.height(2.dp))
         Text(label, style = MaterialTheme.typography.labelSmall, color = tint)
     }
