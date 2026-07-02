@@ -1045,7 +1045,8 @@ class MainActivity : ComponentActivity() {
                             val result = exportEngine.exportAsPdf(
                                 pageUris = scannedPages,
                                 targetSizeBytes = targetBytes,
-                                outputFile = scratchFile
+                                outputFile = scratchFile,
+                                strategy = uiState.compressionStrategy
                             )
                             val displayName = scratchFile.name
                             val savedPath = PublicDocumentSaver.saveToDocuments(
@@ -1073,7 +1074,8 @@ class MainActivity : ComponentActivity() {
                                         targetSizeBytes = targetBytes,
                                         quality = uiState.quality,
                                         targetWidth = uiState.customWidth,
-                                        targetHeight = uiState.customHeight
+                                        targetHeight = uiState.customHeight,
+                                        strategy = uiState.compressionStrategy
                                     )
                                 )
                                 var bytes = out.toByteArray()
