@@ -10,13 +10,23 @@ import java.io.File
 
 enum class OutputFormat { JPEG, PNG, PDF }
 
+/**
+ * How to spend the byte budget when hitting a target size:
+ *  - BALANCED: keep full resolution and crush JPEG quality as far as needed
+ *    (existing behavior). Fastest, but can look blocky/artifacted at small targets.
+ *  - PRESERVE_QUALITY: keep JPEG quality above a floor and shrink resolution
+ *    instead. Text/edges stay cleaner; the tradeoff is a smaller image.
+ */
+enum class CompressionStrategy { BALANCED, PRESERVE_QUALITY }
+
 data class ExportOptions(
     val format: OutputFormat,
     val targetSizeBytes: Long? = null,   // null = no size constraint, use quality directly
     val quality: Int = 90,               // used when no target size given (0-100)
     val maxDimension: Int? = null,       // optional manual downscale cap (longest side, px)
     val targetWidth: Int? = null,        // exact output width in px; null = keep source width
-    val targetHeight: Int? = null        // exact output height in px; null = keep source height
+    val targetHeight: Int? = null,       // exact output height in px; null = keep source height
+    val strategy: CompressionStrategy = CompressionStrategy.BALANCED
 )
 
 data class ExportResult(
@@ -43,6 +53,13 @@ data class ExportResult(
  */
 class ExportEngine(private val context: Context) {
 
+    companion object {
+        /** PRESERVE_QUALITY won't go below this JPEG quality except as an absolute last resort. */
+        private const val QUALITY_FLOOR = 65
+        /** PRESERVE_QUALITY won't shrink a page's longest side below this many px — keeps text readable. */
+        private const val MIN_DIMENSION_FLOOR = 700
+    }
+
     /** Compress a single bitmap to JPEG/PNG bytes, optionally hitting a target size. */
     fun compressImage(
         original: Bitmap,
@@ -65,7 +82,7 @@ class ExportEngine(private val context: Context) {
             return out to ExportMeta(options.quality, bitmap.width, bitmap.height)
         }
 
-        return compressToTarget(bitmap, options.format, options.targetSizeBytes)
+        return compressToTarget(bitmap, options.format, options.targetSizeBytes, options.strategy)
     }
 
     /**
@@ -75,8 +92,13 @@ class ExportEngine(private val context: Context) {
     private fun compressToTarget(
         startBitmap: Bitmap,
         format: OutputFormat,
-        targetBytes: Long
+        targetBytes: Long,
+        strategy: CompressionStrategy = CompressionStrategy.BALANCED
     ): Pair<ByteArrayOutputStream, ExportMeta> {
+        if (strategy == CompressionStrategy.PRESERVE_QUALITY) {
+            return compressToTargetPreservingQuality(startBitmap, format, targetBytes)
+        }
+
         var bitmap = startBitmap
         var bestOut: ByteArrayOutputStream? = null
         var bestQuality = 2
@@ -117,6 +139,86 @@ class ExportEngine(private val context: Context) {
         return (bestOut ?: encode(bitmap, format, 2)) to ExportMeta(bestQuality, bitmap.width, bitmap.height)
     }
 
+    /**
+     * Alternate strategy: hold JPEG quality at or above [QUALITY_FLOOR] and shrink
+     * resolution to hit the target instead. A crushed-quality full-res page tends to
+     * show visible 8x8 block artifacts on text edges; a smaller page at quality 65+
+     * usually reads cleaner even though it's physically smaller.
+     *
+     * Falls back to a full quality-range search (2..95) at the smallest resolution
+     * reached if the floor genuinely can't be hit — a guaranteed-fit result always
+     * beats refusing to shrink further, even if quality dips below the floor.
+     */
+    private fun compressToTargetPreservingQuality(
+        startBitmap: Bitmap,
+        format: OutputFormat,
+        targetBytes: Long
+    ): Pair<ByteArrayOutputStream, ExportMeta> {
+        var bitmap = startBitmap
+        var closestOut: ByteArrayOutputStream? = null
+        var closestQuality = QUALITY_FLOOR
+        var passes = 0
+
+        while (maxOf(bitmap.width, bitmap.height) > MIN_DIMENSION_FLOOR && passes < 20) {
+            var lo = QUALITY_FLOOR
+            var hi = 95
+            var foundUnderBudget: ByteArrayOutputStream? = null
+            var foundQuality = lo
+
+            while (lo <= hi) {
+                val mid = (lo + hi) / 2
+                val attempt = encode(bitmap, format, mid)
+                if (attempt.size() <= targetBytes) {
+                    foundUnderBudget = attempt
+                    foundQuality = mid
+                    lo = mid + 1
+                } else {
+                    hi = mid - 1
+                }
+            }
+
+            if (foundUnderBudget != null) {
+                return foundUnderBudget to ExportMeta(foundQuality, bitmap.width, bitmap.height)
+            }
+
+            // Remember the smallest floor-quality attempt seen, in case we never clear budget above the floor.
+            val floorAttempt = encode(bitmap, format, QUALITY_FLOOR)
+            if (closestOut == null || floorAttempt.size() < closestOut.size()) {
+                closestOut = floorAttempt
+                closestQuality = QUALITY_FLOOR
+            }
+
+            val newMaxDim = (maxOf(bitmap.width, bitmap.height) * 0.9).toInt()
+                .coerceAtLeast(MIN_DIMENSION_FLOOR)
+            if (newMaxDim == maxOf(bitmap.width, bitmap.height)) break // can't shrink further
+            bitmap = downscaleTo(bitmap, newMaxDim)
+            passes++
+        }
+
+        // Floor quality never fit even at the minimum readable resolution — last resort,
+        // search the full quality range at this smallest resolution so we still return
+        // something under budget (or the closest possible attempt).
+        var lo = 2
+        var hi = 95
+        var found: ByteArrayOutputStream? = null
+        var foundQuality = 2
+        while (lo <= hi) {
+            val mid = (lo + hi) / 2
+            val attempt = encode(bitmap, format, mid)
+            if (attempt.size() <= targetBytes) {
+                found = attempt
+                foundQuality = mid
+                lo = mid + 1
+            } else {
+                hi = mid - 1
+            }
+        }
+
+        val finalOut = found ?: closestOut ?: encode(bitmap, format, 2)
+        val finalQuality = if (found != null) foundQuality else closestQuality
+        return finalOut to ExportMeta(finalQuality, bitmap.width, bitmap.height)
+    }
+
     private fun encode(bitmap: Bitmap, format: OutputFormat, quality: Int): ByteArrayOutputStream {
         val out = ByteArrayOutputStream()
         val compressFormat = if (format == OutputFormat.PNG) Bitmap.CompressFormat.PNG
@@ -145,7 +247,8 @@ class ExportEngine(private val context: Context) {
     fun exportAsPdf(
         pageUris: List<Uri>,
         targetSizeBytes: Long?,
-        outputFile: File
+        outputFile: File,
+        strategy: CompressionStrategy = CompressionStrategy.BALANCED
     ): ExportResult {
         // Reserve a little headroom for PDF structural overhead (object headers, xref table,
         // content streams) so the sum of JPEG sizes doesn't itself exceed the target.
@@ -165,7 +268,8 @@ class ExportEngine(private val context: Context) {
             val options = ExportOptions(
                 format = OutputFormat.JPEG,
                 targetSizeBytes = perPageBudget,
-                quality = 90
+                quality = 90,
+                strategy = strategy
             )
             val (compressedOut, meta) = compressImage(bitmap, options)
             val jpegBytes = compressedOut.toByteArray()
