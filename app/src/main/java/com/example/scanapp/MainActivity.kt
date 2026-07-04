@@ -187,6 +187,19 @@ class MainActivity : ComponentActivity() {
 
         repository = DocumentRepository(applicationContext)
 
+        // A self-update replaces this app's own running process the moment
+        // installation actually completes, which can (and on plenty of
+        // devices/OEM installers, does) kill the process before
+        // apkInstallLauncher's result callback ever gets to run
+        // deleteUpdateApkCache() below. That callback still fires normally
+        // for a cancelled/failed install, since the process survives those —
+        // but a successful self-update is exactly the case that most needs
+        // cleanup and is exactly the case where that callback can't be
+        // trusted. So: sweep any leftover update_apk cache on every cold
+        // start too, since by the time this app is running again, whatever
+        // was in there — installed or not — is stale and safe to remove.
+        lifecycleScope.launch(Dispatchers.IO) { deleteUpdateApkCache() }
+
         checkUpdatesOnStart = com.example.scanapp.update.UpdatePreferences.isCheckOnStartEnabled(applicationContext)
         autoInstallUpdates = com.example.scanapp.update.UpdatePreferences.isAutoInstallEnabled(applicationContext)
         if (checkUpdatesOnStart) {
