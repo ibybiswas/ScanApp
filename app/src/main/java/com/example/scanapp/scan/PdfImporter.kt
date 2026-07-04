@@ -32,9 +32,17 @@ object PdfImporter {
      * Renders every page of the PDF at [pdfUri] to its own JPEG file and returns
      * FileProvider content Uris for them, in page order.
      *
+     * [onProgress] is invoked after each page finishes rendering (1-indexed page
+     * number, total page count) so a caller can surface "page X of Y" instead of
+     * a plain indefinite spinner — useful since a large PDF can take a while.
+     *
      * @throws IllegalArgumentException if the Uri can't be opened or isn't a valid PDF.
      */
-    fun importPagesAsJpegs(context: Context, pdfUri: Uri): List<Uri> {
+    fun importPagesAsJpegs(
+        context: Context,
+        pdfUri: Uri,
+        onProgress: (pageNumber: Int, pageCount: Int) -> Unit = { _, _ -> }
+    ): List<Uri> {
         val pfd: ParcelFileDescriptor = context.contentResolver.openFileDescriptor(pdfUri, "r")
             ?: throw IllegalArgumentException("Could not open PDF: $pdfUri")
 
@@ -47,7 +55,8 @@ object PdfImporter {
 
         try {
             PdfRenderer(pfd).use { renderer ->
-                for (pageIndex in 0 until renderer.pageCount) {
+                val pageCount = renderer.pageCount
+                for (pageIndex in 0 until pageCount) {
                     renderer.openPage(pageIndex).use { page ->
                         val scale = TARGET_DPI / POINTS_PER_INCH
                         val widthPx = (page.width * scale).toInt().coerceAtLeast(1)
@@ -66,6 +75,7 @@ object PdfImporter {
                         bitmap.recycle()
                         resultFiles += pageFile
                     }
+                    onProgress(pageIndex + 1, pageCount)
                 }
             }
         } finally {
