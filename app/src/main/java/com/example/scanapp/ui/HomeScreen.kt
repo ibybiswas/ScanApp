@@ -55,6 +55,7 @@ fun HomeScreen(
     onImportPdfClick: () -> Unit = {},
     isImportingPdf: Boolean = false,
     pdfImportError: String? = null,
+    pdfImportProgressText: String? = null,
     onDocumentClick: (RecentDocument) -> Unit,
     onRename: (RecentDocument, newTitle: String) -> Unit = { _, _ -> },
     onDelete: (RecentDocument) -> Unit = {},
@@ -134,6 +135,19 @@ fun HomeScreen(
         floatingActionButton = {
             if (!selectionMode) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (isImportingPdf && pdfImportProgressText != null) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        ) {
+                            Text(
+                                pdfImportProgressText,
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
                     SmallFloatingActionButton(
                         onClick = { if (!isImportingPdf) onImportPdfClick() }
                     ) {
