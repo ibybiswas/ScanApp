@@ -116,11 +116,6 @@ class MainActivity : ComponentActivity() {
     private var pendingInstallApkUri: Uri? = null
 
     private lateinit var driveAuthResolutionLauncher: androidx.activity.result.ActivityResultLauncher<androidx.activity.result.IntentSenderRequest>
-    // Launches the system package installer for the auto-downloaded update
-    // APK and hands control back (regardless of whether the person actually
-    // completed or cancelled the install) so the cached APK can be cleaned
-    // up afterward — see deleteUpdateApkCache().
-    private lateinit var apkInstallLauncher: androidx.activity.result.ActivityResultLauncher<Intent>
     private lateinit var installPermissionSettingsLauncher: androidx.activity.result.ActivityResultLauncher<Intent>
     // Holds whichever Drive backup/restore action is waiting on the user to
     // finish the account-picker/consent screen; invoked with the resulting
@@ -187,17 +182,13 @@ class MainActivity : ComponentActivity() {
 
         repository = DocumentRepository(applicationContext)
 
-        // A self-update replaces this app's own running process the moment
-        // installation actually completes, which can (and on plenty of
-        // devices/OEM installers, does) kill the process before
-        // apkInstallLauncher's result callback ever gets to run
-        // deleteUpdateApkCache() below. That callback still fires normally
-        // for a cancelled/failed install, since the process survives those —
-        // but a successful self-update is exactly the case that most needs
-        // cleanup and is exactly the case where that callback can't be
-        // trusted. So: sweep any leftover update_apk cache on every cold
-        // start too, since by the time this app is running again, whatever
-        // was in there — installed or not — is stale and safe to remove.
+        // The install intent runs the system installer in its own task
+        // (see launchApkInstall) so its "Open" button works reliably after
+        // a self-update — which means we get no callback at all when the
+        // install finishes, successful or not. So: sweep any leftover
+        // update_apk cache on every cold start instead, since by the time
+        // this app is running again, whatever was in there — installed or
+        // not — is stale and safe to remove.
         lifecycleScope.launch(Dispatchers.IO) { deleteUpdateApkCache() }
 
         checkUpdatesOnStart = com.example.scanapp.update.UpdatePreferences.isCheckOnStartEnabled(applicationContext)
@@ -278,20 +269,6 @@ class MainActivity : ComponentActivity() {
                 backupStatusMessage = "Google Drive authorization failed: ${e.message}"
                 isBackupActive = false
             }
-        }
-
-        apkInstallLauncher = registerForActivityResult(
-            androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
-        ) {
-            // Fires once the package installer UI hands control back to us —
-            // whether the person completed the install, cancelled it, or it
-            // failed. Either way this app's cached copy in
-            // cacheDir/update_apk is no longer needed: a completed install
-            // means it's redundant, and a cancelled/failed one means the
-            // person still has the current version and can just tap "Check
-            // for update" again later, which re-downloads fresh rather than
-            // reusing a possibly-stale cached APK.
-            deleteUpdateApkCache()
         }
 
         installPermissionSettingsLauncher = registerForActivityResult(
@@ -1253,11 +1230,19 @@ class MainActivity : ComponentActivity() {
         val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
             setDataAndType(apkUri, "application/vnd.android.package-archive")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            // This is a self-update: a successful install replaces this
+            // app's own running process, which can kill our task mid-flow.
+            // NEW_TASK puts the installer in its own task so it isn't
+            // entangled with ours — without it, the installer's "Open"
+            // button tries to relaunch us into a task that may have just
+            // died, and silently does nothing. (This does mean we can't
+            // startActivityForResult here — Android doesn't allow combining
+            // FLAG_ACTIVITY_NEW_TASK with a result callback — so cache
+            // cleanup for this path relies on the cold-start sweep in
+            // onCreate rather than an immediate post-install callback.)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        // Launched for a result (rather than startActivity) purely so
-        // apkInstallLauncher's callback fires when the installer hands
-        // control back, which is what triggers deleteUpdateApkCache().
-        apkInstallLauncher.launch(installIntent)
+        startActivity(installIntent)
     }
 
     /** Deletes the update_apk cache subfolder created by UpdateApkDownloader. */
