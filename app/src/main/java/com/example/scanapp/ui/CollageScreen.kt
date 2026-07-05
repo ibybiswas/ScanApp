@@ -36,10 +36,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.isSpecified
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
@@ -61,7 +63,7 @@ data class CollagePickerPage(
     val documentTitle: String
 )
 
-private const val MIN_FRAME_FRACTION = 0.12f
+private const val MAX_CONTENT_SCALE = 4f
 
 /** Builds a fresh, empty output page sized for [layout]'s picture count. */
 private fun emptyPage(layout: CollageLayout): CollagePage {
@@ -69,6 +71,40 @@ private fun emptyPage(layout: CollageLayout): CollagePage {
     return CollagePage(frames = rects.map { rect ->
         CollagePictureFrame.empty(x = rect.left, y = rect.top, width = rect.width(), height = rect.height())
     })
+}
+
+/**
+ * Builds pages for [layout], auto-dropping [pictureIds] (in order) straight
+ * into the grid cells — like picking a template in CamScanner immediately
+ * fills its cells with your photos — instead of leaving every cell empty for
+ * one-by-one manual assignment. Extra pages are added automatically once one
+ * page's cells are full; trailing cells on the last page stay empty if
+ * [pictureIds] doesn't fill it exactly.
+ *
+ * Iterates the *template's* cell rects (always exactly [CollageLayout.picturesPerPage]
+ * of them) rather than the picture list, so a page always has the full,
+ * correct number of cells even when fewer pictures than that are available —
+ * fixing a prior bug where a short final chunk silently produced a page with
+ * too few frames.
+ */
+private fun buildPagesForPictureIds(layout: CollageLayout, pictureIds: List<Long>): List<CollagePage> {
+    val rects = CollageDefaultArrangement.ratesFor(layout.picturesPerPage)
+    if (pictureIds.isEmpty()) {
+        return listOf(CollagePage(frames = rects.map { rect ->
+            CollagePictureFrame.empty(x = rect.left, y = rect.top, width = rect.width(), height = rect.height())
+        }))
+    }
+    return pictureIds.chunked(layout.picturesPerPage).map { chunk ->
+        CollagePage(frames = rects.mapIndexed { index, rect ->
+            CollagePictureFrame(
+                pageId = chunk.getOrNull(index),
+                xFraction = rect.left,
+                yFraction = rect.top,
+                widthFraction = rect.width(),
+                heightFraction = rect.height()
+            )
+        })
+    }
 }
 
 @Composable
@@ -91,7 +127,9 @@ fun CollageScreen(
     var selectedOrientation by remember { mutableStateOf(CollageOrientation.PORTRAIT) }
     var activeTab by remember { mutableStateOf(CollageDockTab.PAGE) }
 
-    var pages by remember { mutableStateOf(listOf(emptyPage(selectedLayout))) }
+    var pages by remember {
+        mutableStateOf(buildPagesForPictureIds(selectedLayout, allPages.map { it.pageId }))
+    }
     var currentPageIndex by remember { mutableStateOf(0) }
 
     var selectedFrameIndex by remember { mutableStateOf<Int?>(null) }
@@ -104,23 +142,7 @@ fun CollageScreen(
     fun resizePagesForLayout(newLayout: CollageLayout) {
         val assignedPageIds = pages.flatMap { it.frames }.mapNotNull { it.pageId }
         selectedLayout = newLayout
-        pages = if (assignedPageIds.isEmpty()) {
-            listOf(emptyPage(newLayout))
-        } else {
-            assignedPageIds.chunked(newLayout.picturesPerPage).map { chunk ->
-                val rects = CollageDefaultArrangement.ratesFor(newLayout.picturesPerPage)
-                CollagePage(frames = chunk.mapIndexed { index, pageId ->
-                    val rect = rects.getOrNull(index) ?: rects.last()
-                    CollagePictureFrame(
-                        pageId = pageId,
-                        xFraction = rect.left,
-                        yFraction = rect.top,
-                        widthFraction = rect.width(),
-                        heightFraction = rect.height()
-                    )
-                })
-            }
-        }
+        pages = buildPagesForPictureIds(newLayout, assignedPageIds)
         currentPageIndex = 0
         selectedFrameIndex = null
     }
@@ -161,7 +183,13 @@ fun CollageScreen(
     fun clearFrame(frameIndex: Int) {
         val current = pages.getOrNull(currentPageIndex) ?: return
         val frame = current.frames.getOrNull(frameIndex) ?: return
-        updateFrame(frameIndex, frame.copy(pageId = null))
+        // Reset pan/zoom too, so whatever picture gets assigned to this cell
+        // next starts centered at "cover" zoom instead of inheriting the
+        // previous picture's transform.
+        updateFrame(
+            frameIndex,
+            frame.copy(pageId = null, contentScale = 1f, contentOffsetXFraction = 0f, contentOffsetYFraction = 0f)
+        )
         selectedFrameIndex = null
     }
 
@@ -446,10 +474,12 @@ private fun CollagePageCanvas(
 }
 
 /**
- * One picture's draggable, resizable box on the page canvas. When selected
- * and interactive: dragging the picture body moves it; dragging the
- * bottom-right handle resizes it (anchored at its own top-left, so resizing
- * never has the picture jump position out from under your finger).
+ * One picture's box on the page — its position/size are a fixed grid cell
+ * from the layout template and never change. When selected and interactive:
+ * dragging the picture pans it within the cell; dragging the bottom-right
+ * handle zooms it. The picture always fully covers the cell (ContentScale.Crop
+ * as a floor, clamped panning) so no gesture here can ever open up empty
+ * space at the cell's edges.
  */
 @Composable
 private fun CollagePictureFrameView(
@@ -464,13 +494,12 @@ private fun CollagePictureFrameView(
     onClear: () -> Unit
 ) {
     val density = LocalDensity.current
-    val canvasWidthPx = with(density) { canvasWidthDp.dp.toPx() }
-    val canvasHeightPx = with(density) { canvasHeightDp.dp.toPx() }
-
-    val frameLeftDp = frame.xFraction * canvasWidthDp
-    val frameTopDp = frame.yFraction * canvasHeightDp
     val frameWidthDp = frame.widthFraction * canvasWidthDp
     val frameHeightDp = frame.heightFraction * canvasHeightDp
+    val frameLeftDp = frame.xFraction * canvasWidthDp
+    val frameTopDp = frame.yFraction * canvasHeightDp
+    val frameWidthPx = with(density) { frameWidthDp.dp.toPx() }
+    val frameHeightPx = with(density) { frameHeightDp.dp.toPx() }
 
     Box(
         modifier = Modifier
@@ -482,44 +511,92 @@ private fun CollagePictureFrameView(
             .clickable(onClick = onTap)
     ) {
         if (picture != null) {
-            var dragXFraction by remember(frame.pageId) { mutableStateOf(frame.xFraction) }
-            var dragYFraction by remember(frame.pageId) { mutableStateOf(frame.yFraction) }
+            val painter = rememberAsyncImagePainter(picture.uri)
+
+            var dragScale by remember(frame.pageId) { mutableStateOf(frame.contentScale) }
+            var dragOffsetX by remember(frame.pageId) { mutableStateOf(frame.contentOffsetXFraction) }
+            var dragOffsetY by remember(frame.pageId) { mutableStateOf(frame.contentOffsetYFraction) }
+
+            // Clamps a pan offset (as a fraction of the cell's own size) so the
+            // picture — already covering the cell via ContentScale.Crop as a
+            // floor — can never be dragged far enough to expose empty space.
+            // Mirrors CollageCompositor.drawPictureInFrame's math exactly so
+            // the live preview matches the exported result.
+            fun clampOffsets(scale: Float): Pair<Float, Float> {
+                val intrinsic = painter.intrinsicSize
+                // NOTE: intrinsic.width/height is Float.NaN (not <= 0f — NaN comparisons
+                // are always false) while Coil hasn't resolved the image yet, so this
+                // must check isSpecified rather than a numeric comparison, or a NaN would
+                // silently propagate through the aspect/offset math below.
+                if (!intrinsic.isSpecified || frameWidthDp <= 0f || frameHeightDp <= 0f) {
+                    return 0f to 0f
+                }
+                val bitmapAspect = intrinsic.width / intrinsic.height
+                val frameAspect = frameWidthDp / frameHeightDp
+                val baseWidth: Float
+                val baseHeight: Float
+                if (bitmapAspect > frameAspect) {
+                    baseHeight = frameHeightDp
+                    baseWidth = frameHeightDp * bitmapAspect
+                } else {
+                    baseWidth = frameWidthDp
+                    baseHeight = frameWidthDp / bitmapAspect
+                }
+                val drawWidth = baseWidth * scale
+                val drawHeight = baseHeight * scale
+                val maxOffsetXFraction = ((drawWidth - frameWidthDp) / 2f / frameWidthDp).coerceAtLeast(0f)
+                val maxOffsetYFraction = ((drawHeight - frameHeightDp) / 2f / frameHeightDp).coerceAtLeast(0f)
+                return dragOffsetX.coerceIn(-maxOffsetXFraction, maxOffsetXFraction) to
+                    dragOffsetY.coerceIn(-maxOffsetYFraction, maxOffsetYFraction)
+            }
 
             Image(
-                painter = rememberAsyncImagePainter(picture.uri),
+                painter = painter,
                 contentDescription = picture.documentTitle,
-                contentScale = ContentScale.Fit,
+                contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = dragScale
+                        scaleY = dragScale
+                        translationX = dragOffsetX * size.width
+                        translationY = dragOffsetY * size.height
+                        // Belt-and-suspenders: also clip at the layer itself, not just
+                        // the parent Box, so a scaled-up image can never visually
+                        // escape this cell's bounds regardless of transform order.
+                        clip = true
+                    }
                     .pointerInput(frame.pageId, isSelected, isInteractive) {
                         if (isSelected && isInteractive) {
                             detectDragGestures(
                                 onDragStart = {
-                                    dragXFraction = frame.xFraction
-                                    dragYFraction = frame.yFraction
+                                    dragScale = frame.contentScale
+                                    dragOffsetX = frame.contentOffsetXFraction
+                                    dragOffsetY = frame.contentOffsetYFraction
                                 },
                                 onDrag = { change, dragAmount ->
                                     change.consume()
-                                    val deltaX = dragAmount.x / canvasWidthPx
-                                    val deltaY = dragAmount.y / canvasHeightPx
-                                    dragXFraction = (dragXFraction + deltaX).coerceIn(0f, 1f - frame.widthFraction)
-                                    dragYFraction = (dragYFraction + deltaY).coerceIn(0f, 1f - frame.heightFraction)
-                                    onFrameChange(frame.copy(xFraction = dragXFraction, yFraction = dragYFraction))
+                                    dragOffsetX += dragAmount.x / size.width
+                                    dragOffsetY += dragAmount.y / size.height
+                                    val (clampedX, clampedY) = clampOffsets(dragScale)
+                                    dragOffsetX = clampedX
+                                    dragOffsetY = clampedY
+                                    onFrameChange(
+                                        frame.copy(contentOffsetXFraction = dragOffsetX, contentOffsetYFraction = dragOffsetY)
+                                    )
                                 }
                             )
                         }
                     }
             )
-        }
 
-        if (isSelected) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .border(width = 2.dp, color = MaterialTheme.colorScheme.primary)
-            )
+            if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .border(width = 2.dp, color = MaterialTheme.colorScheme.primary)
+                )
 
-            if (picture != null) {
                 Surface(
                     color = MaterialTheme.colorScheme.error,
                     shape = CircleShape,
@@ -535,9 +612,6 @@ private fun CollagePictureFrameView(
                 }
 
                 if (isInteractive) {
-                    var dragWidthFraction by remember(frame.pageId) { mutableStateOf(frame.widthFraction) }
-                    var dragHeightFraction by remember(frame.pageId) { mutableStateOf(frame.heightFraction) }
-
                     Surface(
                         color = MaterialTheme.colorScheme.primary,
                         shape = CircleShape,
@@ -548,31 +622,47 @@ private fun CollagePictureFrameView(
                             .pointerInput(frame.pageId) {
                                 detectDragGestures(
                                     onDragStart = {
-                                        dragWidthFraction = frame.widthFraction
-                                        dragHeightFraction = frame.heightFraction
+                                        dragScale = frame.contentScale
+                                        dragOffsetX = frame.contentOffsetXFraction
+                                        dragOffsetY = frame.contentOffsetYFraction
                                     },
                                     onDrag = { change, dragAmount ->
                                         change.consume()
-                                        val deltaWidth = dragAmount.x / canvasWidthPx
-                                        val deltaHeight = dragAmount.y / canvasHeightPx
-
-                                        val maxAllowedWidth = 1f - frame.xFraction
-                                        val maxAllowedHeight = 1f - frame.yFraction
-                                        dragWidthFraction = (dragWidthFraction + deltaWidth).coerceIn(MIN_FRAME_FRACTION, maxAllowedWidth)
-                                        dragHeightFraction = (dragHeightFraction + deltaHeight).coerceIn(MIN_FRAME_FRACTION, maxAllowedHeight)
-
-                                        onFrameChange(frame.copy(widthFraction = dragWidthFraction, heightFraction = dragHeightFraction))
+                                        // Dragging away from the cell (down/right) zooms in;
+                                        // toward it zooms back out, down to "cover" (1x). Uses
+                                        // the frame's own on-screen size (not this tiny handle's
+                                        // size) so drag sensitivity feels consistent across cells.
+                                        val referenceLength = (frameWidthPx + frameHeightPx) / 2f
+                                        val delta = (dragAmount.x + dragAmount.y) / (2f * referenceLength)
+                                        dragScale = (dragScale + delta).coerceIn(1f, MAX_CONTENT_SCALE)
+                                        val (clampedX, clampedY) = clampOffsets(dragScale)
+                                        dragOffsetX = clampedX
+                                        dragOffsetY = clampedY
+                                        onFrameChange(
+                                            frame.copy(
+                                                contentScale = dragScale,
+                                                contentOffsetXFraction = dragOffsetX,
+                                                contentOffsetYFraction = dragOffsetY
+                                            )
+                                        )
                                     }
                                 )
                             }
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Filled.OpenWith, contentDescription = "Resize", tint = Color.White, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Filled.OpenWith, contentDescription = "Zoom", tint = Color.White, modifier = Modifier.size(16.dp))
                         }
                     }
                 }
             }
-        } else if (picture == null) {
+        } else {
+            if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .border(width = 2.dp, color = MaterialTheme.colorScheme.primary)
+                )
+            }
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.InsertPageBreak, contentDescription = "Empty", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
             }
