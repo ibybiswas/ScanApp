@@ -15,11 +15,13 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -68,7 +70,9 @@ fun HomeScreen(
     onSortChange: (DocumentSortBy, SortDirection) -> Unit = { _, _ -> },
     onSettingsClick: () -> Unit = {},
     onToolsClick: () -> Unit = {},
-    onBackupClick: () -> Unit = {}
+    onBackupClick: () -> Unit = {},
+    isDarkTheme: Boolean = false,
+    onToggleDarkModeClick: () -> Unit = {}
 ) {
     var actionSheetTarget by remember { mutableStateOf<RecentDocument?>(null) }
     var renameTarget by remember { mutableStateOf<RecentDocument?>(null) }
@@ -206,6 +210,16 @@ fun HomeScreen(
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f)
                     )
+                    IconButton(
+                        onClick = onToggleDarkModeClick,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            if (isDarkTheme) Icons.Filled.LightMode else Icons.Filled.DarkMode,
+                            contentDescription = if (isDarkTheme) "Switch to day mode" else "Switch to dark mode"
+                        )
+                    }
+                    Spacer(Modifier.width(4.dp))
                     IconButton(
                         onClick = { searchExpanded = true },
                         modifier = Modifier.size(36.dp)
