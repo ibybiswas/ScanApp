@@ -15,11 +15,13 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -30,7 +32,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
@@ -68,7 +73,9 @@ fun HomeScreen(
     onSortChange: (DocumentSortBy, SortDirection) -> Unit = { _, _ -> },
     onSettingsClick: () -> Unit = {},
     onToolsClick: () -> Unit = {},
-    onBackupClick: () -> Unit = {}
+    onBackupClick: () -> Unit = {},
+    isDarkTheme: Boolean = false,
+    onToggleDarkModeClick: (Offset) -> Unit = {}
 ) {
     var actionSheetTarget by remember { mutableStateOf<RecentDocument?>(null) }
     var renameTarget by remember { mutableStateOf<RecentDocument?>(null) }
@@ -80,6 +87,7 @@ fun HomeScreen(
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
     var searchExpanded by remember { mutableStateOf(searchQuery.isNotEmpty()) }
     var sortMenuExpanded by remember { mutableStateOf(false) }
+    var toggleButtonCenter by remember { mutableStateOf(Offset.Zero) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(pdfImportError) {
@@ -206,6 +214,24 @@ fun HomeScreen(
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f)
                     )
+                    IconButton(
+                        onClick = { onToggleDarkModeClick(toggleButtonCenter) },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .onGloballyPositioned { coords ->
+                                val pos = coords.positionInRoot()
+                                toggleButtonCenter = Offset(
+                                    pos.x + coords.size.width / 2f,
+                                    pos.y + coords.size.height / 2f
+                                )
+                            }
+                    ) {
+                        Icon(
+                            if (isDarkTheme) Icons.Filled.LightMode else Icons.Filled.DarkMode,
+                            contentDescription = if (isDarkTheme) "Switch to day mode" else "Switch to dark mode"
+                        )
+                    }
+                    Spacer(Modifier.width(4.dp))
                     IconButton(
                         onClick = { searchExpanded = true },
                         modifier = Modifier.size(36.dp)

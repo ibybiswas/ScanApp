@@ -10,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.AlertDialog
@@ -21,6 +22,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
@@ -43,6 +45,8 @@ import com.example.scanapp.ui.HomeScreen
 import com.example.scanapp.ui.RecentDocument
 import com.example.scanapp.ui.ScanScreen
 import com.example.scanapp.ui.SizeUnit
+import com.example.scanapp.ui.ThemeRevealContainer
+import com.example.scanapp.ui.rememberThemeRevealState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -125,6 +129,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var repository: DocumentRepository
 
     private var currentScreen by mutableStateOf(Screen.HOME)
+    // null means "follow the system setting"; once the person taps the
+    // day/night toggle on the homepage this holds their explicit choice
+    // for the rest of the process lifetime.
+    private var darkThemeOverride by mutableStateOf<Boolean?>(null)
     private var scannedPages by mutableStateOf<List<Uri>>(emptyList())
     private var isExporting by mutableStateOf(false)
     private var exportResultText by mutableStateOf<String?>(null)
@@ -286,7 +294,12 @@ class MainActivity : ComponentActivity() {
         observeLibrary()
 
         setContent {
-            ScanAppTheme {
+            val effectiveDarkTheme = darkThemeOverride ?: isSystemInDarkTheme()
+            ScanAppTheme(darkTheme = effectiveDarkTheme) {
+                val themeRevealState = rememberThemeRevealState()
+                val themeRevealLayer = rememberGraphicsLayer()
+                val themeRevealScope = rememberCoroutineScope()
+
                 BackHandler(enabled = currentScreen != Screen.HOME) {
                     currentScreen = when (currentScreen) {
                         Screen.DETAIL -> Screen.HOME
@@ -298,6 +311,11 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                ThemeRevealContainer(
+                    state = themeRevealState,
+                    graphicsLayer = themeRevealLayer,
+                    modifier = Modifier.fillMaxSize()
+                ) {
                 when (currentScreen) {
                     Screen.HOME -> HomeScreen(
                         recentDocuments = recentDocuments,
@@ -321,7 +339,16 @@ class MainActivity : ComponentActivity() {
                         onSortChange = { sortBy, direction -> onHomeSortChange(sortBy, direction) },
                         onSettingsClick = { currentScreen = Screen.SETTINGS },
                         onToolsClick = { openCollageScreen() },
-                        onBackupClick = { currentScreen = Screen.BACKUP }
+                        onBackupClick = { currentScreen = Screen.BACKUP },
+                        isDarkTheme = effectiveDarkTheme,
+                        onToggleDarkModeClick = { tapCenter ->
+                            themeRevealState.trigger(
+                                scope = themeRevealScope,
+                                graphicsLayer = themeRevealLayer,
+                                tapCenter = tapCenter,
+                                switchTheme = { darkThemeOverride = !effectiveDarkTheme }
+                            )
+                        }
                     )
                     Screen.DETAIL -> {
                         val documentId = openDocumentId
@@ -434,6 +461,7 @@ class MainActivity : ComponentActivity() {
                         onToolsClick = { openCollageScreen() },
                         onSettingsClick = { currentScreen = Screen.SETTINGS }
                     )
+                }
                 }
                 }
 
