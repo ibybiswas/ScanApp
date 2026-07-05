@@ -32,7 +32,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
@@ -72,7 +75,7 @@ fun HomeScreen(
     onToolsClick: () -> Unit = {},
     onBackupClick: () -> Unit = {},
     isDarkTheme: Boolean = false,
-    onToggleDarkModeClick: () -> Unit = {}
+    onToggleDarkModeClick: (Offset) -> Unit = {}
 ) {
     var actionSheetTarget by remember { mutableStateOf<RecentDocument?>(null) }
     var renameTarget by remember { mutableStateOf<RecentDocument?>(null) }
@@ -84,6 +87,7 @@ fun HomeScreen(
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
     var searchExpanded by remember { mutableStateOf(searchQuery.isNotEmpty()) }
     var sortMenuExpanded by remember { mutableStateOf(false) }
+    var toggleButtonCenter by remember { mutableStateOf(Offset.Zero) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(pdfImportError) {
@@ -211,8 +215,16 @@ fun HomeScreen(
                         modifier = Modifier.weight(1f)
                     )
                     IconButton(
-                        onClick = onToggleDarkModeClick,
-                        modifier = Modifier.size(36.dp)
+                        onClick = { onToggleDarkModeClick(toggleButtonCenter) },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .onGloballyPositioned { coords ->
+                                val pos = coords.positionInRoot()
+                                toggleButtonCenter = Offset(
+                                    pos.x + coords.size.width / 2f,
+                                    pos.y + coords.size.height / 2f
+                                )
+                            }
                     ) {
                         Icon(
                             if (isDarkTheme) Icons.Filled.LightMode else Icons.Filled.DarkMode,
