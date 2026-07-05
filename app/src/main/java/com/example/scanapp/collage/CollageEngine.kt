@@ -72,10 +72,15 @@ object CollageLayouts {
 
 /**
  * One picture's free-form placement on a page, in normalized [0,1] fractions
- * of the page's width/height. Unlike a fixed-cell layout, there's no implicit
- * boundary clamping the picture to a slot — x/y/width/height are exactly the
- * rectangle the user dragged and resized it to, so two pictures can be any
- * size, anywhere, even overlapping if the user wants that.
+ * of the page's width/height. There's no implicit boundary clamping the
+ * picture to a slot — x/y/width/height are exactly the rectangle the user
+ * dragged and resized it to, so two pictures can be any size, anywhere, even
+ * overlapping if the user wants that.
+ *
+ * The picture is always stretched/compressed to exactly match this
+ * rectangle (see [CollageCompositor]) rather than fit-with-letterboxing —
+ * that's what guarantees there's never empty space inside the frame's own
+ * boundary, no matter what aspect ratio the user resizes it to.
  */
 data class CollagePictureFrame(
     val pageId: Long?,
@@ -143,10 +148,10 @@ object CollageDefaultArrangement {
 
 /**
  * Renders a list of pages, each a free-form arrangement of picture frames,
- * into one bitmap per page. Each picture is scaled to FIT within its own
- * frame rectangle (preserving aspect ratio, centered within that
- * rectangle) — for documents, losing part of the page to a crop is much
- * worse than a sliver of empty margin inside the frame.
+ * into one bitmap per page. Each picture is stretched/compressed to exactly
+ * match its own frame rectangle — not fit-with-letterboxing — so a frame's
+ * boundary and the picture's visible edges are always the same line,
+ * whatever aspect ratio the user resizes the frame to.
  *
  * An empty frame (pageId == null) is simply skipped — it never reaches this
  * point in practice since the UI only creates a page once at least one
@@ -186,10 +191,11 @@ object CollageCompositor {
     }
 
     /**
-     * Draws one picture into its frame rectangle, fitting it within that
-     * rectangle (preserve aspect ratio, centered) rather than stretching or
-     * cropping to fill — the frame's own size IS the user's chosen size, so
-     * "fit" here just avoids distorting the picture's proportions inside it.
+     * Draws one picture stretched to exactly fill its frame rectangle —
+     * matching CamScanner's collage behavior, where resizing a frame always
+     * resizes the picture inside it 1:1 with no gap and no crop, at the cost
+     * of distorting the picture's proportions if the frame's aspect ratio
+     * doesn't match the picture's own.
      */
     private fun drawPictureInFrame(
         canvas: Canvas,
@@ -204,19 +210,7 @@ object CollageCompositor {
         val frameWidth = frame.widthFraction * canvasWidthPx
         val frameHeight = frame.heightFraction * canvasHeightPx
 
-        val bitmapAspect = bitmap.width.toFloat() / bitmap.height.toFloat()
-        val frameAspect = frameWidth / frameHeight
-
-        val (drawWidth, drawHeight) = if (bitmapAspect > frameAspect) {
-            frameWidth to (frameWidth / bitmapAspect)
-        } else {
-            (frameHeight * bitmapAspect) to frameHeight
-        }
-
-        val drawLeft = frameLeft + (frameWidth - drawWidth) / 2f
-        val drawTop = frameTop + (frameHeight - drawHeight) / 2f
-
-        val destRect = RectF(drawLeft, drawTop, drawLeft + drawWidth, drawTop + drawHeight)
+        val destRect = RectF(frameLeft, frameTop, frameLeft + frameWidth, frameTop + frameHeight)
         canvas.drawBitmap(bitmap, null, destRect, paint)
     }
 }
