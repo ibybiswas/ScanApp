@@ -36,10 +36,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
@@ -65,10 +65,40 @@ private const val MIN_FRAME_FRACTION = 0.12f
 
 /** Builds a fresh, empty output page sized for [layout]'s picture count. */
 private fun emptyPage(layout: CollageLayout): CollagePage {
-    val rects = CollageDefaultArrangement.ratesFor(layout.picturesPerPage)
+    val rects = CollageDefaultArrangement.ratesFor(layout.picturesPerPage, layout.gridCols, layout.gridRows)
     return CollagePage(frames = rects.map { rect ->
         CollagePictureFrame.empty(x = rect.left, y = rect.top, width = rect.width(), height = rect.height())
     })
+}
+
+/**
+ * Builds pages for [layout] from [pictureIds] (in order), one page per
+ * [CollageLayout.picturesPerPage] pictures. Iterates the template's cell
+ * rects (always exactly that many) rather than the picture list, so a page
+ * always has the full, correct number of frames even when the last chunk
+ * has fewer pictures than the layout calls for — fixes a prior bug where a
+ * short final chunk silently produced a page with too few frames when
+ * switching layouts. Used to re-flow already-assigned pictures when the
+ * layout changes; it does not pull in anything from the picker pool itself.
+ */
+private fun buildPagesForPictureIds(layout: CollageLayout, pictureIds: List<Long>): List<CollagePage> {
+    val rects = CollageDefaultArrangement.ratesFor(layout.picturesPerPage, layout.gridCols, layout.gridRows)
+    if (pictureIds.isEmpty()) {
+        return listOf(CollagePage(frames = rects.map { rect ->
+            CollagePictureFrame.empty(x = rect.left, y = rect.top, width = rect.width(), height = rect.height())
+        }))
+    }
+    return pictureIds.chunked(layout.picturesPerPage).map { chunk ->
+        CollagePage(frames = rects.mapIndexed { index, rect ->
+            CollagePictureFrame(
+                pageId = chunk.getOrNull(index),
+                xFraction = rect.left,
+                yFraction = rect.top,
+                widthFraction = rect.width(),
+                heightFraction = rect.height()
+            )
+        })
+    }
 }
 
 @Composable
@@ -104,23 +134,7 @@ fun CollageScreen(
     fun resizePagesForLayout(newLayout: CollageLayout) {
         val assignedPageIds = pages.flatMap { it.frames }.mapNotNull { it.pageId }
         selectedLayout = newLayout
-        pages = if (assignedPageIds.isEmpty()) {
-            listOf(emptyPage(newLayout))
-        } else {
-            assignedPageIds.chunked(newLayout.picturesPerPage).map { chunk ->
-                val rects = CollageDefaultArrangement.ratesFor(newLayout.picturesPerPage)
-                CollagePage(frames = chunk.mapIndexed { index, pageId ->
-                    val rect = rects.getOrNull(index) ?: rects.last()
-                    CollagePictureFrame(
-                        pageId = pageId,
-                        xFraction = rect.left,
-                        yFraction = rect.top,
-                        widthFraction = rect.width(),
-                        heightFraction = rect.height()
-                    )
-                })
-            }
-        }
+        pages = buildPagesForPictureIds(newLayout, assignedPageIds)
         currentPageIndex = 0
         selectedFrameIndex = null
     }
@@ -449,7 +463,11 @@ private fun CollagePageCanvas(
  * One picture's draggable, resizable box on the page canvas. When selected
  * and interactive: dragging the picture body moves it; dragging the
  * bottom-right handle resizes it (anchored at its own top-left, so resizing
- * never has the picture jump position out from under your finger).
+ * never has the picture jump position out from under your finger). The
+ * picture is always stretched/compressed to exactly match the frame's
+ * current boundary (ContentScale.FillBounds) — matching CamScanner, where
+ * the picture's visible edges and the frame's boundary line are always the
+ * same line, whatever aspect ratio you resize the frame to.
  */
 @Composable
 private fun CollagePictureFrameView(
@@ -488,7 +506,7 @@ private fun CollagePictureFrameView(
             Image(
                 painter = rememberAsyncImagePainter(picture.uri),
                 contentDescription = picture.documentTitle,
-                contentScale = ContentScale.Fit,
+                contentScale = ContentScale.FillBounds,
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(frame.pageId, isSelected, isInteractive) {
