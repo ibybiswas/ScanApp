@@ -135,8 +135,21 @@ object UpdateChecker {
      * (noise for a short in-app summary), keeping just the change itself.
      */
     private fun parseChangelog(body: String?): List<String> {
-        if (body.isNullOrBlank()) return emptyList()
-        val attributionSuffix = Regex("""\s+by\s+@\S+\s+in\s+#?\d+.*$""", RegexOption.IGNORE_CASE)
+        // org.json's optString() returns the literal string "null" (not an
+        // empty string) when the JSON value is a real JSON null — which is
+        // exactly what GitHub sends for "body" when a release has no
+        // description. Without this check, releases with no notes at all
+        // would show a single bogus "null" line instead of nothing.
+        if (body.isNullOrBlank() || body == "null") return emptyList()
+
+        // GitHub's auto-generated notes attribute each line like:
+        //   "* Add dark mode by @user in https://github.com/owner/repo/pull/14"
+        // (a full PR URL, not "#14" — an earlier version of this regex
+        // assumed a bare issue number and so left this suffix in place).
+        val attributionSuffix = Regex(
+            """\s+by\s+@\S+\s+in\s+\S+\s*$""",
+            RegexOption.IGNORE_CASE
+        )
 
         return body.lineSequence()
             .map { it.trim() }
