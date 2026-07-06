@@ -52,7 +52,10 @@ import com.example.scanapp.ui.RecentDocument
 import com.example.scanapp.ui.ScanScreen
 import com.example.scanapp.ui.SizeUnit
 import com.example.scanapp.ui.ThemeRevealContainer
+import com.example.scanapp.ui.ThemeMode
 import com.example.scanapp.ui.rememberThemeRevealState
+import com.example.scanapp.ui.toDarkOverride
+import com.example.scanapp.ui.toThemeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -318,7 +321,8 @@ class MainActivity : ComponentActivity() {
         observeLibrary()
 
         setContent {
-            val effectiveDarkTheme = darkThemeOverride ?: isSystemInDarkTheme()
+            val systemDarkTheme = isSystemInDarkTheme()
+            val effectiveDarkTheme = darkThemeOverride ?: systemDarkTheme
 
             // SystemBarStyle.auto() only picks light/dark icons once, at
             // launch, based on the system setting — it doesn't react when
@@ -378,18 +382,30 @@ class MainActivity : ComponentActivity() {
                         onSettingsClick = { currentScreen = Screen.SETTINGS },
                         onToolsClick = { openCollageScreen() },
                         onBackupClick = { currentScreen = Screen.BACKUP },
-                        isDarkTheme = effectiveDarkTheme,
-                        onToggleDarkModeClick = { tapCenter ->
-                            themeRevealState.trigger(
-                                scope = themeRevealScope,
-                                graphicsLayer = themeRevealLayer,
-                                tapCenter = tapCenter,
-                                switchTheme = {
-                                    val newValue = !effectiveDarkTheme
-                                    darkThemeOverride = newValue
-                                    com.example.scanapp.ui.ThemePreferences.setDarkOverride(applicationContext, newValue)
-                                }
-                            )
+                        themeMode = darkThemeOverride.toThemeMode(),
+                        onThemeModeSelected = { newMode, tapCenter ->
+                            val newOverride = newMode.toDarkOverride()
+                            val newEffectiveDarkTheme = newOverride ?: systemDarkTheme
+
+                            val persistAndApply: () -> Unit = {
+                                darkThemeOverride = newOverride
+                                com.example.scanapp.ui.ThemePreferences.setDarkOverride(applicationContext, newOverride)
+                            }
+
+                            if (newEffectiveDarkTheme != effectiveDarkTheme) {
+                                // Appearance is actually changing — play the reveal.
+                                themeRevealState.trigger(
+                                    scope = themeRevealScope,
+                                    graphicsLayer = themeRevealLayer,
+                                    tapCenter = tapCenter,
+                                    switchTheme = persistAndApply
+                                )
+                            } else {
+                                // e.g. picking "Auto" while the system already matches
+                                // the current forced choice — nothing to reveal, just
+                                // remember the new mode for next time.
+                                persistAndApply()
+                            }
                         }
                     )
                     Screen.DETAIL -> {
