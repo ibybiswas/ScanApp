@@ -358,6 +358,13 @@ class MainActivity : ComponentActivity() {
                     graphicsLayer = themeRevealLayer,
                     modifier = Modifier.fillMaxSize()
                 ) {
+                // Declared here (outside the `when` below) rather than inside
+                // HomeScreen's own `remember`, so it survives navigating away
+                // to another Screen and back — HomeScreen's composable is
+                // fully removed from composition while on DETAIL/SETTINGS/etc,
+                // which would otherwise forget the scroll position.
+                val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
+
                 when (currentScreen) {
                     Screen.HOME -> HomeScreen(
                         recentDocuments = recentDocuments,
@@ -374,6 +381,7 @@ class MainActivity : ComponentActivity() {
                             shareDocument(documentId, doc.title, format)
                         },
                         onDeleteMultiple = { docs -> deleteMultipleDocuments(docs) },
+                        onReorder = { orderedDocs -> reorderDocuments(orderedDocs) },
                         searchQuery = homeSearchQuery,
                         onSearchQueryChange = { query -> onHomeSearchQueryChange(query) },
                         sortBy = homeSortBy,
@@ -383,6 +391,7 @@ class MainActivity : ComponentActivity() {
                         onToolsClick = { openCollageScreen() },
                         onBackupClick = { currentScreen = Screen.BACKUP },
                         themeMode = darkThemeOverride.toThemeMode(),
+                        listState = homeListState,
                         onThemeModeSelected = { newMode, tapCenter ->
                             val newOverride = newMode.toDarkOverride()
                             val newEffectiveDarkTheme = newOverride ?: systemDarkTheme
@@ -942,6 +951,23 @@ class MainActivity : ComponentActivity() {
         if (ids.isEmpty()) return
         lifecycleScope.launch {
             ids.forEach { id -> repository.deleteDocument(id) }
+        }
+    }
+
+    /**
+     * Persists the drag-reordered Home list, then switches the active sort
+     * mode to MANUAL. Done in that order (write, then switch + re-observe)
+     * so the list doesn't briefly re-subscribe to the old manual order and
+     * flicker back before the write lands.
+     */
+    private fun reorderDocuments(orderedDocs: List<RecentDocument>) {
+        val ids = orderedDocs.mapNotNull { it.id.toLongOrNull() }
+        if (ids.isEmpty()) return
+        lifecycleScope.launch {
+            repository.reorderDocuments(ids)
+            homeSortBy = DocumentSortBy.MANUAL
+            homeSortDirection = SortDirection.ASCENDING
+            observeLibrary()
         }
     }
 
