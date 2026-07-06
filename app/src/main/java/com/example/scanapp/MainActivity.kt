@@ -382,7 +382,6 @@ class MainActivity : ComponentActivity() {
                         onSettingsClick = { currentScreen = Screen.SETTINGS },
                         onToolsClick = { openCollageScreen() },
                         onBackupClick = { currentScreen = Screen.BACKUP },
-                        isDarkTheme = effectiveDarkTheme,
                         themeMode = darkThemeOverride.toThemeMode(),
                         onThemeModeSelected = { newMode, tapCenter ->
                             val newOverride = newMode.toDarkOverride()
