@@ -2,6 +2,7 @@ package com.example.scanapp.ui
 
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -317,9 +318,15 @@ fun HomeScreen(
             // Floating header: translucent so rows scrolling underneath it
             // (and under the status bar above it) are still faintly visible
             // through it, the same way Poweramp's track bar sits over the
-            // lyrics rather than pushing them down.
+            // lyrics rather than pushing them down. Gets more translucent
+            // still while the list is actively being scrolled, then settles
+            // back to its resting opacity once scrolling stops.
+            val headerAlpha by animateFloatAsState(
+                targetValue = if (listState.isScrollInProgress) 0.6f else 0.92f,
+                label = "headerAlpha"
+            )
             Surface(
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = headerAlpha),
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.TopStart)
@@ -328,11 +335,15 @@ fun HomeScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        // Keeps the title/icons clear of the status bar's
-                        // clock and battery icons now that the space behind
-                        // them is transparent instead of an opaque bar.
-                        .statusBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        // The selection TopAppBar above already reserves and
+                        // pads for the status bar, and Scaffold's own content
+                        // padding already accounts for that combined height —
+                        // adding statusBarsPadding here too would double it
+                        // up, which is what was pushing this row way down
+                        // below the "N selected" bar. Only apply it ourselves
+                        // when there's no TopAppBar doing that job already.
+                        .then(if (!selectionMode) Modifier.statusBarsPadding() else Modifier)
+                        .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 2.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (searchExpanded) {
