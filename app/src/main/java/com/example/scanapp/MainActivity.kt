@@ -228,6 +228,8 @@ class MainActivity : ComponentActivity() {
         checkUpdatesOnStart = com.example.scanapp.update.UpdatePreferences.isCheckOnStartEnabled(applicationContext)
         autoInstallUpdates = com.example.scanapp.update.UpdatePreferences.isAutoInstallEnabled(applicationContext)
         darkThemeOverride = com.example.scanapp.ui.ThemePreferences.getDarkOverride(applicationContext)
+        homeSortBy = com.example.scanapp.data.SortPreferences.getSortBy(applicationContext)
+        homeSortDirection = com.example.scanapp.data.SortPreferences.getSortDirection(applicationContext)
         if (checkUpdatesOnStart) {
             checkForUpdateOnStartup()
         }
@@ -654,6 +656,7 @@ class MainActivity : ComponentActivity() {
     private fun onHomeSortChange(sortBy: DocumentSortBy, direction: SortDirection) {
         homeSortBy = sortBy
         homeSortDirection = direction
+        com.example.scanapp.data.SortPreferences.setSort(applicationContext, sortBy, direction)
         observeLibrary()
     }
 
@@ -967,6 +970,7 @@ class MainActivity : ComponentActivity() {
             repository.reorderDocuments(ids)
             homeSortBy = DocumentSortBy.MANUAL
             homeSortDirection = SortDirection.ASCENDING
+            com.example.scanapp.data.SortPreferences.setSort(applicationContext, homeSortBy, homeSortDirection)
             observeLibrary()
         }
     }
