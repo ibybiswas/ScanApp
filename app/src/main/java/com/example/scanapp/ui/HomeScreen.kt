@@ -740,9 +740,19 @@ internal fun ScanAppBottomNav(
     NavigationBar(
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 0.dp,
+        // By default NavigationBar reserves extra bottom space equal to the
+        // gesture/navigation bar height and fills it with containerColor —
+        // that's the opaque strip stretching from the pill down to the
+        // bottom of the screen. We turn that off here and instead push the
+        // whole pill up above the gesture area with plain (transparent)
+        // padding, so the screen's real background shows through behind
+        // it and around it, edge-to-edge.
+        windowInsets = WindowInsets(0, 0, 0, 0),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .height(68.dp)
             .clip(RoundedCornerShape(28.dp))
     ) {
         items.forEach { (label, icon, index) ->
