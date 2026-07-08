@@ -402,6 +402,14 @@ fun HomeScreen(
                     .align(Alignment.TopStart)
                     .onGloballyPositioned { headerHeightPx = it.size.height }
             ) {
+                // Material3 pads every IconButton/TextButton out to a 48dp
+                // minimum touch target regardless of visual size — invisible,
+                // but real for hit-testing. With the header's bottom padding
+                // trimmed down tight against the list, that invisible padding
+                // was overlapping the first row below and swallowing the
+                // touch before its drag handle ever saw it. Pinning it to 0
+                // here makes each button's tap area match its visual bounds.
+                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -511,6 +519,7 @@ fun HomeScreen(
                             }
                         }
                     }
+                }
                 }
             }
         }
