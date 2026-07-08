@@ -8,7 +8,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.scrollBy
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.*
@@ -44,6 +44,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.awaitFirstDown
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -753,15 +755,39 @@ private fun RecentDocumentRow(
                 modifier = Modifier
                     .padding(8.dp)
                     .pointerInput(doc.id) {
-                        detectDragGestures(
-                            onDragStart = { onDragStart() },
-                            onDragEnd = { onDragEnd() },
-                            onDragCancel = { onDragEnd() },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                onDrag(dragAmount.y)
+                        // detectDragGestures doesn't claim the touch until
+                        // movement crosses the slop threshold — so a brief
+                        // press-and-hold before moving (easy to do on a
+                        // small handle icon) left the window open for the
+                        // parent row's combinedClickable long-press to win
+                        // that race instead. Since selection mode is already
+                        // on, that long-press toggles the row's selection,
+                        // which can empty selectedIds and drop out of
+                        // selection mode entirely, cancelling the drag out
+                        // from under the finger. Consuming the down event the
+                        // instant it lands here means the parent's long-press
+                        // (which requires an unconsumed down) never starts.
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            down.consume()
+                            onDragStart()
+                            var pointerId = down.id
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == pointerId } ?: break
+                                if (!change.pressed) {
+                                    change.consume()
+                                    break
+                                }
+                                val dy = change.positionChange().y
+                                if (dy != 0f) {
+                                    change.consume()
+                                    onDrag(dy)
+                                }
+                                pointerId = change.id
                             }
-                        )
+                            onDragEnd()
+                        }
                     }
             )
         } else if (!selectionMode) {
