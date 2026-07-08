@@ -773,7 +773,16 @@ private fun RecentDocumentRow(
                         // instant it lands here means the parent's long-press
                         // (which requires an unconsumed down) never starts.
                         awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
+                            // Avoiding awaitFirstDown here — it wouldn't
+                            // resolve against this Compose UI version either
+                            // imported or implicit, so get the initial press
+                            // the same primitive way the rest of this loop
+                            // already does: through awaitPointerEvent(),
+                            // which is a genuine AwaitPointerEventScope
+                            // member rather than an extension function, so
+                            // there's no import path to get wrong.
+                            val downEvent = awaitPointerEvent()
+                            val down = downEvent.changes.firstOrNull() ?: return@awaitEachGesture
                             down.consume()
                             onDragStart()
                             var pointerId = down.id
