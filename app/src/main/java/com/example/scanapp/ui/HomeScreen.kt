@@ -11,6 +11,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.scrollBy
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -44,6 +45,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.awaitFirstDown
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -111,7 +113,16 @@ fun HomeScreen(
     // recomposition/emission to snap the dragged item back to its old spot.
     var orderedDocs by remember { mutableStateOf(recentDocuments) }
     var draggingId by remember { mutableStateOf<String?>(null) }
-    var dragOffsetY by remember { mutableStateOf(0f) }
+    // Index the dragged item started at, plus the *raw*, unadjusted total
+    // pixels dragged since then (from both direct finger movement and
+    // auto-scroll compensation — never manually incremented/decremented on
+    // a swap the way the old implementation did, which is what let it drift
+    // out of sync with the list at the index 0/1 boundary). The dragged
+    // row's current index and its visual offset are both derived fresh from
+    // these two numbers every time, rather than accumulated step by step.
+    var dragStartIndex by remember { mutableStateOf(0) }
+    var rawDragDeltaY by remember { mutableStateOf(0f) }
+    var dragRenderOffset by remember { mutableStateOf(0f) }
     var rowHeightPx by remember { mutableStateOf(0) }
     LaunchedEffect(recentDocuments) {
         if (draggingId == null) orderedDocs = recentDocuments
@@ -140,38 +151,32 @@ fun HomeScreen(
 
     fun endDrag() {
         draggingId = null
-        dragOffsetY = 0f
+        dragRenderOffset = 0f
         onReorder(orderedDocs)
     }
 
-    // Shared by both the direct drag callback and the auto-scroll loop below:
-    // whenever dragOffsetY has drifted far enough past a row boundary, move
-    // the dragged item over that neighbor in orderedDocs and fold the
-    // crossed row's height back out of the offset. A while loop (rather than
-    // a single if) because a big auto-scroll tick can cross more than one
-    // row boundary in one step.
-    fun trySwap(docId: String) {
+    // Recomputes the dragged item's target index directly from total drag
+    // distance (rounded to the nearest row), moves it there in one step if
+    // it's not already there, and derives the remaining visual offset from
+    // wherever it actually ended up — including at a clamped boundary like
+    // index 0. Called after every raw delta update, from both the direct
+    // drag callback and the auto-scroll loop, so there's exactly one place
+    // that decides where the row is, instead of two places incrementally
+    // adjusting the same running offset and risking drift between them.
+    fun updateDragPosition(docId: String) {
         val heightPx = rowHeightPx
         if (heightPx <= 0) return
-        var fromIndex = orderedDocs.indexOfFirst { it.id == docId }
-        if (fromIndex == -1) return
-        while (dragOffsetY > heightPx / 2 && fromIndex < orderedDocs.lastIndex) {
-            orderedDocs = orderedDocs.toMutableList().apply { add(fromIndex + 1, removeAt(fromIndex)) }
-            dragOffsetY -= heightPx
-            fromIndex += 1
+        val currentIndex = orderedDocs.indexOfFirst { it.id == docId }
+        if (currentIndex == -1) return
+        val lastIndex = orderedDocs.lastIndex
+        val rawSteps = (rawDragDeltaY / heightPx).roundToInt()
+        val targetIndex = (dragStartIndex + rawSteps).coerceIn(0, lastIndex)
+        if (targetIndex != currentIndex) {
+            orderedDocs = orderedDocs.toMutableList().apply {
+                add(targetIndex, removeAt(currentIndex))
+            }
         }
-        while (dragOffsetY < -heightPx / 2 && fromIndex > 0) {
-            orderedDocs = orderedDocs.toMutableList().apply { add(fromIndex - 1, removeAt(fromIndex)) }
-            dragOffsetY += heightPx
-            fromIndex -= 1
-        }
-        // Already first/last in the list, so no further swap is possible in
-        // that direction — clamp rather than let dragOffsetY keep growing
-        // while held there. Unbounded, it used to drag the row indefinitely
-        // upward/downward past the header/footer and out of view.
-        val maxOffset = heightPx / 2f
-        if (fromIndex == 0) dragOffsetY = dragOffsetY.coerceAtLeast(-maxOffset)
-        if (fromIndex == orderedDocs.lastIndex) dragOffsetY = dragOffsetY.coerceAtMost(maxOffset)
+        dragRenderOffset = rawDragDeltaY - (targetIndex - dragStartIndex) * heightPx
     }
 
     // Auto-scrolls the list while a drag is held near the top or bottom edge
@@ -188,7 +193,7 @@ fun HomeScreen(
             val heightPx = rowHeightPx
             val itemInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == activeId }
             if (heightPx > 0 && itemInfo != null) {
-                val itemTop = itemInfo.offset + dragOffsetY
+                val itemTop = itemInfo.offset + dragRenderOffset
                 val itemBottom = itemTop + itemInfo.size
                 val viewportStart = listState.layoutInfo.viewportStartOffset
                 val viewportEnd = listState.layoutInfo.viewportEndOffset
@@ -217,11 +222,8 @@ fun HomeScreen(
                 }
                 if (scrollAmount != 0f) {
                     val consumed = listState.scrollBy(scrollAmount)
-                    // Counteract the scroll in the offset so the dragged row
-                    // stays put under the finger while the rows behind it
-                    // move — otherwise it'd visually jump with the scroll.
-                    dragOffsetY += consumed
-                    trySwap(activeId)
+                    rawDragDeltaY += consumed
+                    updateDragPosition(activeId)
                 }
             }
             delay(16)
@@ -348,7 +350,7 @@ fun HomeScreen(
                             modifier = Modifier
                                 .zIndex(if (isDragging) 1f else 0f)
                                 .graphicsLayer {
-                                    translationY = if (isDragging) dragOffsetY else 0f
+                                    translationY = if (isDragging) dragRenderOffset else 0f
                                 }
                                 .onGloballyPositioned { coords ->
                                     if (rowHeightPx == 0) rowHeightPx = coords.size.height
@@ -372,10 +374,15 @@ fun HomeScreen(
                                     },
                                     onMoreClick = { actionSheetTarget = doc },
                                     showDragHandle = selectionMode && searchQuery.isBlank(),
-                                    onDragStart = { draggingId = doc.id; dragOffsetY = 0f },
+                                    onDragStart = {
+                                        draggingId = doc.id
+                                        dragStartIndex = orderedDocs.indexOfFirst { it.id == doc.id }
+                                        rawDragDeltaY = 0f
+                                        dragRenderOffset = 0f
+                                    },
                                     onDrag = { deltaY ->
-                                        dragOffsetY += deltaY
-                                        trySwap(doc.id)
+                                        rawDragDeltaY += deltaY
+                                        updateDragPosition(doc.id)
                                     },
                                     onDragEnd = { endDrag() }
                                 )
@@ -767,17 +774,7 @@ private fun RecentDocumentRow(
                         // instant it lands here means the parent's long-press
                         // (which requires an unconsumed down) never starts.
                         awaitEachGesture {
-                            // awaitEachGesture only re-enters this block once
-                            // every pointer has been raised, so the very
-                            // first pointer event it sees here is the down
-                            // that starts the new gesture. Reading it via
-                            // awaitPointerEvent() (rather than the
-                            // awaitFirstDown() helper) is deliberate: this
-                            // build's Compose UI classpath fails to resolve
-                            // the awaitFirstDown symbol, even though the
-                            // rest of androidx.compose.ui.input.pointer
-                            // compiles fine.
-                            val down = awaitPointerEvent().changes.first()
+                            val down = awaitFirstDown(requireUnconsumed = false)
                             down.consume()
                             onDragStart()
                             var pointerId = down.id
