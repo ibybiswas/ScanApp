@@ -66,6 +66,9 @@ fun SettingsScreen(
     onBackupClick: () -> Unit = {}
 ) {
     Scaffold(
+        // See HomeScreen: stop Scaffold from painting an opaque
+        // system-bar-height strip behind the floating bottom nav pill.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Settings") },

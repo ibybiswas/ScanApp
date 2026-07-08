@@ -120,6 +120,11 @@ fun BackupScreen(
     }
 
     Scaffold(
+        // Match HomeScreen: don't let Scaffold reserve an opaque
+        // system-bar-height strip behind the bottom bar — ScanAppBottomNav
+        // now handles its own transparent navigation-bar inset padding, so
+        // the app's real background should show through around it.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             ScanAppBottomNav(
                 selectedIndex = 2,

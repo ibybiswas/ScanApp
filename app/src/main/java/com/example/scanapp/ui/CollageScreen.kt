@@ -195,6 +195,9 @@ fun CollageScreen(
     val hasAnyAssignedPage = pages.any { page -> page.frames.any { it.pageId != null } }
 
     Scaffold(
+        // See HomeScreen: stop Scaffold from painting an opaque
+        // system-bar-height strip behind the floating bottom nav pill.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             if (!isFullscreenEdit) {
                 TopAppBar(
