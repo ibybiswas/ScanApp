@@ -164,6 +164,13 @@ fun HomeScreen(
             dragOffsetY += heightPx
             fromIndex -= 1
         }
+        // Already first/last in the list, so no further swap is possible in
+        // that direction — clamp rather than let dragOffsetY keep growing
+        // while held there. Unbounded, it used to drag the row indefinitely
+        // upward/downward past the header/footer and out of view.
+        val maxOffset = heightPx / 2f
+        if (fromIndex == 0) dragOffsetY = dragOffsetY.coerceAtLeast(-maxOffset)
+        if (fromIndex == orderedDocs.lastIndex) dragOffsetY = dragOffsetY.coerceAtMost(maxOffset)
     }
 
     // Auto-scrolls the list while a drag is held near the top or bottom edge
@@ -189,12 +196,19 @@ fun HomeScreen(
                 // jumpy compared to easing in as you approach the edge.
                 val edgeZonePx = heightPx * 0.75f
                 val maxScrollSpeedPx = heightPx * 0.6f
+                // canScrollBackward/Forward are the ground truth for whether
+                // there's actually more content in that direction. Relying
+                // on offset math alone isn't enough: the first item's resting
+                // top coincides almost exactly with the viewport's start, so
+                // the "near top edge" comparison was true from the moment
+                // you grabbed it — before any movement — even though there
+                // was nothing above it to scroll to.
                 val scrollAmount = when {
-                    itemTop < viewportStart + edgeZonePx -> {
+                    listState.canScrollBackward && itemTop < viewportStart + edgeZonePx -> {
                         val intensity = ((viewportStart + edgeZonePx - itemTop) / edgeZonePx).coerceIn(0f, 1f)
                         -maxScrollSpeedPx * intensity
                     }
-                    itemBottom > viewportEnd - edgeZonePx -> {
+                    listState.canScrollForward && itemBottom > viewportEnd - edgeZonePx -> {
                         val intensity = ((itemBottom - (viewportEnd - edgeZonePx)) / edgeZonePx).coerceIn(0f, 1f)
                         maxScrollSpeedPx * intensity
                     }
