@@ -169,11 +169,24 @@ fun HomeScreen(
         if (currentIndex == -1) return
         val lastIndex = orderedDocs.lastIndex
         val rawSteps = (rawDragDeltaY / heightPx).roundToInt()
-        val targetIndex = (dragStartIndex + rawSteps).coerceIn(0, lastIndex)
+        val uncoercedTargetIndex = dragStartIndex + rawSteps
+        val targetIndex = uncoercedTargetIndex.coerceIn(0, lastIndex)
         if (targetIndex != currentIndex) {
             orderedDocs = orderedDocs.toMutableList().apply {
                 add(targetIndex, removeAt(currentIndex))
             }
+        }
+        // Once the target has hit either end of the list, rawDragDeltaY
+        // itself needs to stop growing too — not just the index. Otherwise
+        // holding a drag at the top/bottom edge lets it keep accumulating
+        // indefinitely in the background (invisibly, since the index is
+        // already clamped), and reversing direction afterward has to first
+        // "unwind" all of that hidden distance before the item visually
+        // starts following the finger again — which is exactly what made
+        // dragging the first document back down feel completely stuck after
+        // it had been dragged up to the top.
+        if (uncoercedTargetIndex != targetIndex) {
+            rawDragDeltaY = (targetIndex - dragStartIndex) * heightPx.toFloat()
         }
         dragRenderOffset = rawDragDeltaY - (targetIndex - dragStartIndex) * heightPx
     }
