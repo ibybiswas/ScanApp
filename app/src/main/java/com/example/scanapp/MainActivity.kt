@@ -77,6 +77,13 @@ private val LightColors = lightColorScheme(
     onSecondaryContainer = androidx.compose.ui.graphics.Color(0xFF181A2C),
     tertiary = androidx.compose.ui.graphics.Color(0xFF75546F),
     onTertiary = androidx.compose.ui.graphics.Color(0xFFFFFFFF),
+    // background left at its default would be a slightly different shade
+    // than our custom surface — Scaffold paints with background by default,
+    // so anywhere that shows raw Scaffold background next to a surface-toned
+    // Card/Surface (e.g. the area around the floating bottom nav) would show
+    // a visible seam. Pin it to match surface so they're always identical.
+    background = androidx.compose.ui.graphics.Color(0xFFFEF8FF),
+    onBackground = androidx.compose.ui.graphics.Color(0xFF1D1B20),
     surface = androidx.compose.ui.graphics.Color(0xFFFEF8FF),
     onSurface = androidx.compose.ui.graphics.Color(0xFF1D1B20),
     surfaceVariant = androidx.compose.ui.graphics.Color(0xFFE2E1EC),
@@ -94,6 +101,11 @@ private val DarkColors = darkColorScheme(
     onSecondaryContainer = androidx.compose.ui.graphics.Color(0xFFE0E1F9),
     tertiary = androidx.compose.ui.graphics.Color(0xFFE4BBDB),
     onTertiary = androidx.compose.ui.graphics.Color(0xFF442740),
+    // See LightColors above — pin background to match surface so Scaffold's
+    // default paint is never a different shade than the Cards/Surfaces/nav
+    // pill sitting on top of it.
+    background = androidx.compose.ui.graphics.Color(0xFF151318),
+    onBackground = androidx.compose.ui.graphics.Color(0xFFE6E1E6),
     surface = androidx.compose.ui.graphics.Color(0xFF151318),
     onSurface = androidx.compose.ui.graphics.Color(0xFFE6E1E6),
     surfaceVariant = androidx.compose.ui.graphics.Color(0xFF45464F),
