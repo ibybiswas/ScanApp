@@ -44,7 +44,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.awaitFirstDown
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -768,7 +767,17 @@ private fun RecentDocumentRow(
                         // instant it lands here means the parent's long-press
                         // (which requires an unconsumed down) never starts.
                         awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
+                            // awaitEachGesture only re-enters this block once
+                            // every pointer has been raised, so the very
+                            // first pointer event it sees here is the down
+                            // that starts the new gesture. Reading it via
+                            // awaitPointerEvent() (rather than the
+                            // awaitFirstDown() helper) is deliberate: this
+                            // build's Compose UI classpath fails to resolve
+                            // the awaitFirstDown symbol, even though the
+                            // rest of androidx.compose.ui.input.pointer
+                            // compiles fine.
+                            val down = awaitPointerEvent().changes.first()
                             down.consume()
                             onDragStart()
                             var pointerId = down.id
