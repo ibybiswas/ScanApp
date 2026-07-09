@@ -143,7 +143,7 @@ fun BackupScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp + navBarHeightDp)
+            .padding(horizontal = 16.dp, vertical = 16.dp)
             .verticalScroll(scrollState),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -375,6 +375,12 @@ fun BackupScreen(
                 }
             }
         }
+
+        // A real scrollable spacer (not outer Modifier.padding, which
+        // doesn't reserve genuine scroll room the same way LazyColumn's
+        // contentPadding does) — lets the last card scroll fully clear of
+        // the floating nav pill instead of ending up directly behind it.
+        Spacer(Modifier.height(navBarHeightDp))
     }
 
     // Overlaid on top of the scrolled content instead of reserved via
