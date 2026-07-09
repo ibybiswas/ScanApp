@@ -2,12 +2,13 @@ package com.example.scanapp.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.animation.core.PushOutSlowInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -139,6 +140,7 @@ fun BackupScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding)
+            .background(MaterialTheme.colorScheme.background) // Fixes edge-to-edge color bleeding behind status/navigation bars
     ) {
     Column(
         modifier = Modifier
