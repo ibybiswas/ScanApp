@@ -212,6 +212,19 @@ class MainActivity : ComponentActivity() {
                 android.graphics.Color.TRANSPARENT
             )
         )
+        // enableEdgeToEdge() doesn't reliably turn off Android's automatic
+        // "contrast enforcement" scrim on every OEM skin — on API 29+ the
+        // system draws its own translucent black layer behind a transparent
+        // status/nav bar for icon legibility, independent of anything we
+        // draw ourselves. Where our content is busy (photo thumbnails on
+        // Home) that scrim just blends in; where it's plain (Backup's
+        // cards) it shows up as a flat opaque strip. We already handle our
+        // own legibility via isAppearanceLightStatusBars/NavigationBars
+        // below, so turn the system's extra scrim off explicitly.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
+        }
         super.onCreate(savedInstanceState)
 
         repository = DocumentRepository(applicationContext)
