@@ -5,19 +5,32 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
-// versionCode/versionName are derived from a build number instead of being
-// hardcoded. Every previous build shipped versionCode=1, versionName="1.0" —
-// identical on every release — which is why Android's package manager
-// refused to install a new build over an old one (it looked like the *same*
-// version, not an update) without uninstalling first.
+// versionCode and versionName now do two different jobs, on purpose:
 //
-// The CI workflow passes -PbuildNumber=<run_number> on every build, so each
-// GitHub Actions run produces a strictly increasing versionCode and a
-// distinct versionName (e.g. "1.0.47"). Local builds (no -P flag) fall back
-// to buildNumber 1, so `./gradlew assembleDebug` on your machine still works
-// without extra setup — it just won't be installable *over* a CI build with a
-// higher versionCode (expected: it's a genuinely older/different version).
+// versionCode is the plain, ever-climbing integer Android actually uses to
+// decide "is this build newer than the installed one" — it's invisible to
+// users, so it's fine (expected, even) for it to be a big ugly number. The
+// CI workflow passes -PbuildNumber=<run_number> on every build, giving a
+// strictly increasing versionCode automatically. Local builds (no -P flag)
+// fall back to buildNumber 1.
+//
+// versionName is the human-facing string (Play Store, Settings, the update
+// dialog). It used to be derived from the same buildNumber ("1.0.$buildNumber"),
+// which meant it climbed by one on every single CI run instead of only on
+// releases that actually warranted a new version — hence versionName drifting
+// into things like "1.0.101".
+//
+// It's set below as a plain literal, but you normally won't touch this by
+// hand: the release workflow's "Bump app version" step auto-increments it
+// on every release dispatch (PATCH 0→9, then MINOR bumps and PATCH resets:
+// 1.1.0 → 1.1.9 → 1.2.0 → …) and commits the new value back to this file
+// before building. Edit it here yourself only for a MAJOR bump, or to
+// correct the sequence. UpdateChecker compares the release tag numerically
+// against BuildConfig.VERSION_NAME to detect updates, and the release
+// workflow tags each release from this exact value — see
+// .github/workflows/build.yml.
 val buildNumber = (project.findProperty("buildNumber") as String?)?.toIntOrNull() ?: 1
+val appVersionName = "1.1.0"
 
 android {
     namespace = "com.example.scanapp"
@@ -28,7 +41,7 @@ android {
         minSdk = 24
         targetSdk = 35
         versionCode = buildNumber
-        versionName = "1.0.$buildNumber"
+        versionName = appVersionName
     }
 
     buildFeatures {
