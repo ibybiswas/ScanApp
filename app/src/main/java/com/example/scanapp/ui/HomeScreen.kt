@@ -202,4 +202,277 @@ fun HomeScreen(
                         }
                     }
                     SmallFloatingActionButton(
-                        onClick = { if (!isImportingPdf) onImportPdfClick()
+                        onClick = { if (!isImportingPdf) onImportPdfClick() }
+                    ) {
+                        if (isImportingPdf) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(Icons.Filled.UploadFile, contentDescription = "Import PDF")
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    FloatingActionButton(onClick = onScanClick) {
+                        Icon(Icons.Filled.CameraAlt, contentDescription = "Scan document")
+                    }
+                }
+            }
+        }
+    ) { padding ->
+        var headerHeightPx by remember { mutableStateOf(0) }
+        val headerHeightDp = with(LocalDensity.current) { headerHeightPx.toDp() }
+
+        Box(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+        ) {
+            if (recentDocuments.isEmpty()) {
+                EmptyRecentsState(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = headerHeightDp, bottom = navBarHeightDp),
+                    isSearching = searchQuery.isNotBlank()
+                )
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = headerHeightDp, bottom = navBarHeightDp)
+                ) {
+                    items(orderedDocs, key = { it.id }) { doc ->
+                        val isDragging = draggingId == doc.id
+                        Box(
+                            modifier = Modifier
+                                .zIndex(if (isDragging) 1f else 0f)
+                                .graphicsLayer {
+                                    translationY = if (isDragging) dragOffsetY else 0f
+                                }
+                                .onGloballyPositioned { coords ->
+                                    if (rowHeightPx == 0) rowHeightPx = coords.size.height
+                                }
+                        ) {
+                            Column {
+                                RecentDocumentRow(
+                                    doc = doc,
+                                    selectionMode = selectionMode,
+                                    selected = doc.id in selectedIds,
+                                    onClick = {
+                                        if (selectionMode) toggleSelected(doc) else onDocumentClick(doc)
+                                    },
+                                    onLongClick = {
+                                        if (!selectionMode) {
+                                            selectionMode = true
+                                            selectedIds = setOf(doc.id)
+                                        } else {
+                                            toggleSelected(doc)
+                                        }
+                                    },
+                                    onMoreClick = { actionSheetTarget = doc },
+                                    showDragHandle = selectionMode && searchQuery.isBlank(),
+                                    onDragStart = { draggingId = doc.id; dragOffsetY = 0f },
+                                    onDrag = { deltaY ->
+                                        dragOffsetY += deltaY
+                                        val heightPx = rowHeightPx
+                                        if (heightPx > 0) {
+                                            val fromIndex = orderedDocs.indexOfFirst { it.id == doc.id }
+                                            if (fromIndex != -1) {
+                                                if (dragOffsetY > heightPx / 2 && fromIndex < orderedDocs.lastIndex) {
+                                                    orderedDocs = orderedDocs.toMutableList().apply {
+                                                        add(fromIndex + 1, removeAt(fromIndex))
+                                                    }
+                                                    dragOffsetY -= heightPx
+                                                } else if (dragOffsetY < -heightPx / 2 && fromIndex > 0) {
+                                                    orderedDocs = orderedDocs.toMutableList().apply {
+                                                        add(fromIndex - 1, removeAt(fromIndex))
+                                                    }
+                                                    dragOffsetY += heightPx
+                                                }
+                                            }
+                                        }
+                                    },
+                                    onDragEnd = { endDrag() }
+                                )
+                                HorizontalDivider(modifier = Modifier.padding(start = 116.dp))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Absolutely transparent background area behind header text and status bar icons
+            Surface(
+                color = Color.Transparent,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopStart)
+                    .onGloballyPositioned { headerHeightPx = it.size.height }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(if (!selectionMode) Modifier.statusBarsPadding() else Modifier)
+                        .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 0.dp), // Cut down to 0.dp
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (searchExpanded) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = onSearchQueryChange,
+                            placeholder = { Text("Search files") },
+                            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                            trailingIcon = {
+                                IconButton(onClick = {
+                                    onSearchQueryChange("")
+                                    searchExpanded = false
+                                }) {
+                                    Icon(Icons.Filled.Close, contentDescription = "Close search")
+                                }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(24.dp),
+                            textStyle = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier
+                                .weight(1f)
+                        )
+                    } else {
+                        Text(
+                            "All files",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Box {
+                            IconButton(
+                                onClick = { themeMenuExpanded = true },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .onGloballyPositioned { coords ->
+                                        val pos = coords.positionInRoot()
+                                        toggleButtonCenter = Offset(
+                                            pos.x + coords.size.width / 2f,
+                                            pos.y + coords.size.height / 2f
+                                        )
+                                    }
+                            ) {
+                                Icon(
+                                    when (themeMode) {
+                                        ThemeMode.AUTO -> Icons.Filled.BrightnessAuto
+                                        ThemeMode.DARK -> Icons.Filled.DarkMode
+                                        ThemeMode.LIGHT -> Icons.Filled.LightMode
+                                    },
+                                    contentDescription = "Day/night mode"
+                                )
+                            }
+                            ThemeMenu(
+                                expanded = themeMenuExpanded,
+                                current = themeMode,
+                                onDismiss = { themeMenuExpanded = false },
+                                onSelect = { newMode ->
+                                    themeMenuExpanded = false
+                                    onThemeModeSelected(newMode, toggleButtonCenter)
+                                }
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        IconButton(
+                            onClick = { searchExpanded = true },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Filled.Search, contentDescription = "Search")
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        Box {
+                            IconButton(
+                                onClick = { sortMenuExpanded = true },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort")
+                            }
+                            SortMenu(
+                                expanded = sortMenuExpanded,
+                                sortBy = sortBy,
+                                direction = sortDirection,
+                                onDismiss = { sortMenuExpanded = false },
+                                onSelect = { newSortBy, newDirection ->
+                                    sortMenuExpanded = false
+                                    onSortChange(newSortBy, newDirection)
+                                }
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        if (recentDocuments.isNotEmpty()) {
+                            TextButton(onClick = {
+                                selectionMode = true
+                                selectedIds = recentDocuments.map { it.id }.toSet()
+                            }) {
+                                Text("Select all")
+                            }
+                        }
+                    }
+                }
+            }
+
+            ScanAppBottomNav(
+                onSettingsClick = onSettingsClick,
+                onToolsClick = onToolsClick,
+                onBackupClick = onBackupClick,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .onGloballyPositioned { navBarHeightPx = it.size.height }
+            )
+        }
+    }
+
+    actionSheetTarget?.let { doc ->
+        DocumentActionSheet(
+            onDismiss = { actionSheetTarget = null },
+            onRenameClick = { actionSheetTarget = null; renameTarget = doc },
+            onDeleteClick = { actionSheetTarget = null; deleteTarget = doc },
+            onShareClick = { actionSheetTarget = null; shareTarget = doc }
+        )
+    }
+
+    renameTarget?.let { doc ->
+        RenameDialog(
+            currentTitle = doc.title,
+            onConfirm = { newTitle -> renameTarget = null; onRename(doc, newTitle) },
+            onDismiss = { renameTarget = null }
+        )
+    }
+
+    deleteTarget?.let { doc ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("Delete document?") },
+            text = { Text("This will permanently delete \"${doc.title}\" and all its pages.") },
+            confirmButton = {
+                TextButton(onClick = { deleteTarget = null; onDelete(doc) }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (deleteMultipleConfirm) {
+        val targets = recentDocuments.filter { it.id in selectedIds }
+        AlertDialog(
+            onDismissRequest = { deleteMultipleConfirm = false },
+            title = { Text("Delete ${targets.size} document${if (targets.size == 1) "" else "s"}?") },
+            text = { Text("This will permanently delete the selected document(s) and all their pages.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteMultipleConfirm = false
+                    onDeleteMultiple(targets)
+                    clearSelection()
+                }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteMultipleConfirm =
