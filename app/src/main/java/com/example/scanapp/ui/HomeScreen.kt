@@ -39,7 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color // Added missing import
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -192,4 +192,14 @@ fun HomeScreen(
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.padding(bottom = 8.
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        ) {
+                            Text(
+                                pdfImportProgressText,
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                    SmallFloatingActionButton(
+                        onClick = { if (!isImportingPdf) onImportPdfClick()
