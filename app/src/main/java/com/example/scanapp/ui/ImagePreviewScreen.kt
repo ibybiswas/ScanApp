@@ -4,8 +4,11 @@ package com.example.scanapp.ui
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -37,6 +40,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
@@ -136,19 +140,38 @@ private fun ZoomableImage(
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(page.pageId) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    val newScale = (scale * zoom).coerceIn(1f, 5f)
-                    offset = if (newScale > 1f) {
-                        val maxX = (size.width * (newScale - 1f)) / 2f
-                        val maxY = (size.height * (newScale - 1f)) / 2f
-                        Offset(
-                            x = (offset.x + pan.x).coerceIn(-maxX, maxX),
-                            y = (offset.y + pan.y).coerceIn(-maxY, maxY)
-                        )
-                    } else {
-                        Offset.Zero
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val changes = event.changes
+                        if (changes.none { it.pressed }) break
+
+                        // Only claim the gesture for ourselves when it's an
+                        // actual pinch (2+ fingers) or the image is already
+                        // zoomed in (so a single finger pans around inside
+                        // it). A plain single-finger drag at 1x scale is
+                        // left completely unconsumed so HorizontalPager's
+                        // own swipe detector sees it and flips pages.
+                        val isPinch = changes.size > 1
+                        if (isPinch || scale > 1f) {
+                            val zoomChange = event.calculateZoom()
+                            val panChange = event.calculatePan()
+                            val newScale = (scale * zoomChange).coerceIn(1f, 5f)
+                            offset = if (newScale > 1f) {
+                                val maxX = (size.width * (newScale - 1f)) / 2f
+                                val maxY = (size.height * (newScale - 1f)) / 2f
+                                Offset(
+                                    x = (offset.x + panChange.x).coerceIn(-maxX, maxX),
+                                    y = (offset.y + panChange.y).coerceIn(-maxY, maxY)
+                                )
+                            } else {
+                                Offset.Zero
+                            }
+                            scale = newScale
+                            changes.forEach { if (it.positionChanged()) it.consume() }
+                        }
                     }
-                    scale = newScale
                 }
             }
             .pointerInput(page.pageId) {
