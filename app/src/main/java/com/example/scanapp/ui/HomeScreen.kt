@@ -46,7 +46,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalThemeAuthority
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -54,9 +53,9 @@ import coil.compose.rememberAsyncImagePainter
 import com.example.scanapp.export.OutputFormat
 import com.example.scanapp.data.DocumentSortBy
 import com.example.scanapp.data.SortDirection
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+
+// Explicit import to fix the build failure
+import com.example.scanapp.ui.ThemeMode
 
 data class RecentDocument(
     val id: String,
@@ -306,7 +305,6 @@ fun HomeScreen(
                 }
             }
 
-            // Smoothly transitions from completely clear to 95% translucent when items start rolling under it
             val headerAlpha by animateFloatAsState(
                 targetValue = if (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 5) 0.95f else 0.0f,
                 label = "headerAlpha"
@@ -323,7 +321,6 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .then(if (!selectionMode) Modifier.statusBarsPadding() else Modifier)
-                        // Cut padding space underneath the header down to 0.dp for maximum tightness
                         .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 0.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -613,7 +610,6 @@ private fun RecentDocumentRow(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            // Trim row spacing from vertical = 10.dp down to 6.dp to tighten list density
             .padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
