@@ -112,7 +112,7 @@ fun ScanAppTheme(
     )
 }
 
-private enum class Screen { HOME, DETAIL, SCAN_EXPORT, SETTINGS, COLLAGE, BACKUP }
+private enum class Screen { HOME, DETAIL, IMAGE_PREVIEW, SCAN_EXPORT, SETTINGS, COLLAGE, BACKUP }
 
 class MainActivity : ComponentActivity() {
 
@@ -180,6 +180,7 @@ class MainActivity : ComponentActivity() {
     private var openDocumentId by mutableStateOf<Long?>(null)
     private var openDocumentTitle by mutableStateOf("")
     private var openDocumentPages by mutableStateOf<List<DetailPage>>(emptyList())
+    private var previewStartIndex by mutableStateOf(0)
 
     private var collagePickerPages by mutableStateOf<List<com.example.scanapp.ui.CollagePickerPage>>(emptyList())
     private var isSavingCollage by mutableStateOf(false)
@@ -348,6 +349,7 @@ class MainActivity : ComponentActivity() {
                 BackHandler(enabled = currentScreen != Screen.HOME) {
                     currentScreen = when (currentScreen) {
                         Screen.DETAIL -> Screen.HOME
+                        Screen.IMAGE_PREVIEW -> Screen.DETAIL
                         Screen.SCAN_EXPORT -> if (openDocumentId != null) Screen.DETAIL else Screen.HOME
                         Screen.SETTINGS -> Screen.HOME
                         Screen.COLLAGE -> Screen.HOME
@@ -433,12 +435,29 @@ class MainActivity : ComponentActivity() {
                                 onDelete = { deleteOpenDocument(documentId) },
                                 onShare = { format -> shareDocument(documentId, openDocumentTitle, format) },
                                 onExportClick = { openExportScreenForOpenDocument() },
-                                onPageClick = { page -> launchPageEditViaMlKit(documentId, page) },
+                                onPageClick = { page ->
+                                    val index = openDocumentPages.indexOfFirst { it.pageId == page.pageId }
+                                    previewStartIndex = if (index >= 0) index else 0
+                                    currentScreen = Screen.IMAGE_PREVIEW
+                                },
                                 onAddPagesClick = { launchAddPagesScan(documentId) },
                                 onDeletePage = { page -> deletePageFromOpenDocument(documentId, page) },
                                 onReorder = { orderedIds -> reorderOpenDocumentPages(documentId, orderedIds) },
                                 onExportSelected = { selectedPages -> openExportScreenForSelectedPages(selectedPages) },
                                 onEditSelected = { selectedPages -> launchPagesEditViaMlKit(documentId, selectedPages) }
+                            )
+                        }
+                    }
+                    Screen.IMAGE_PREVIEW -> {
+                        val documentId = openDocumentId
+                        if (documentId == null || openDocumentPages.isEmpty()) {
+                            currentScreen = Screen.HOME
+                        } else {
+                            com.example.scanapp.ui.ImagePreviewScreen(
+                                pages = openDocumentPages,
+                                initialIndex = previewStartIndex,
+                                onBackClick = { currentScreen = Screen.DETAIL },
+                                onEditClick = { page -> launchPageEditViaMlKit(documentId, page) }
                             )
                         }
                     }
