@@ -2,7 +2,6 @@ package com.example.scanapp.ui
 
 import android.net.Uri
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -40,7 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Color // Added missing import
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -193,173 +192,4 @@ fun HomeScreen(
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        ) {
-                            Text(
-                                pdfImportProgressText,
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                            )
-                        }
-                    }
-                    SmallFloatingActionButton(
-                        onClick = { if (!isImportingPdf) onImportPdfClick() }
-                    ) {
-                        if (isImportingPdf) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Icon(Icons.Filled.UploadFile, contentDescription = "Import PDF")
-                        }
-                    }
-                    Spacer(Modifier.height(16.dp))
-                    FloatingActionButton(onClick = onScanClick) {
-                        Icon(Icons.Filled.CameraAlt, contentDescription = "Scan document")
-                    }
-                }
-            }
-        }
-    ) { padding ->
-        var headerHeightPx by remember { mutableStateOf(0) }
-        val headerHeightDp = with(LocalDensity.current) { headerHeightPx.toDp() }
-
-        Box(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
-        ) {
-            if (recentDocuments.isEmpty()) {
-                EmptyRecentsState(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(top = headerHeightDp, bottom = navBarHeightDp),
-                    isSearching = searchQuery.isNotBlank()
-                )
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(top = headerHeightDp, bottom = navBarHeightDp)
-                ) {
-                    items(orderedDocs, key = { it.id }) { doc ->
-                        val isDragging = draggingId == doc.id
-                        Box(
-                            modifier = Modifier
-                                .zIndex(if (isDragging) 1f else 0f)
-                                .graphicsLayer {
-                                    translationY = if (isDragging) dragOffsetY else 0f
-                                }
-                                .onGloballyPositioned { coords ->
-                                    if (rowHeightPx == 0) rowHeightPx = coords.size.height
-                                }
-                        ) {
-                            Column {
-                                RecentDocumentRow(
-                                    doc = doc,
-                                    selectionMode = selectionMode,
-                                    selected = doc.id in selectedIds,
-                                    onClick = {
-                                        if (selectionMode) toggleSelected(doc) else onDocumentClick(doc)
-                                    },
-                                    onLongClick = {
-                                        if (!selectionMode) {
-                                            selectionMode = true
-                                            selectedIds = setOf(doc.id)
-                                        } else {
-                                            toggleSelected(doc)
-                                        }
-                                    },
-                                    onMoreClick = { actionSheetTarget = doc },
-                                    showDragHandle = selectionMode && searchQuery.isBlank(),
-                                    onDragStart = { draggingId = doc.id; dragOffsetY = 0f },
-                                    onDrag = { deltaY ->
-                                        dragOffsetY += deltaY
-                                        val heightPx = rowHeightPx
-                                        if (heightPx > 0) {
-                                            val fromIndex = orderedDocs.indexOfFirst { it.id == doc.id }
-                                            if (fromIndex != -1) {
-                                                if (dragOffsetY > heightPx / 2 && fromIndex < orderedDocs.lastIndex) {
-                                                    orderedDocs = orderedDocs.toMutableList().apply {
-                                                        add(fromIndex + 1, removeAt(fromIndex))
-                                                    }
-                                                    dragOffsetY -= heightPx
-                                                } else if (dragOffsetY < -heightPx / 2 && fromIndex > 0) {
-                                                    orderedDocs = orderedDocs.toMutableList().apply {
-                                                        add(fromIndex - 1, removeAt(fromIndex))
-                                                    }
-                                                    dragOffsetY += heightPx
-                                                }
-                                            }
-                                        }
-                                    },
-                                    onDragEnd = { endDrag() }
-                                )
-                                HorizontalDivider(modifier = Modifier.padding(start = 116.dp))
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Absolute transparent area behind status bar & header text
-            Surface(
-                color = Color.Transparent,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.TopStart)
-                    .onGloballyPositioned { headerHeightPx = it.size.height }
-            ) {
-                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .then(if (!selectionMode) Modifier.statusBarsPadding() else Modifier)
-                        .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 0.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (searchExpanded) {
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = onSearchQueryChange,
-                            placeholder = { Text("Search files") },
-                            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                            trailingIcon = {
-                                IconButton(onClick = {
-                                    onSearchQueryChange("")
-                                    searchExpanded = false
-                                }) {
-                                    Icon(Icons.Filled.Close, contentDescription = "Close search")
-                                }
-                            },
-                            singleLine = true,
-                            shape = RoundedCornerShape(24.dp),
-                            textStyle = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier
-                                .weight(1f)
-                        )
-                    } else {
-                        Text(
-                            "All files",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Box {
-                            IconButton(
-                                onClick = { themeMenuExpanded = true },
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .onGloballyPositioned { coords ->
-                                        val pos = coords.positionInRoot()
-                                        toggleButtonCenter = Offset(
-                                            pos.x + coords.size.width / 2f,
-                                            pos.y + coords.size.height / 2f
-                                        )
-                                    }
-                            ) {
-                                Icon(
-                                    when (themeMode) {
-                                        ThemeMode.AUTO -> Icons.Filled.BrightnessAuto
-                                        ThemeMode.DARK -> Icons.Filled.DarkMode
+                            modifier = Modifier.padding(bottom = 8.
