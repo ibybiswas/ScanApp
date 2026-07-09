@@ -27,9 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -121,12 +119,15 @@ fun BackupScreen(
         }
     }
 
-    // ScanAppBottomNav is overlaid directly on the content Box below instead
-    // of living in Scaffold's bottomBar slot, so it floats over the scrolled
-    // content (and the real background shows around/behind it) rather than
-    // Scaffold reserving a plain rectangle of layout space for it.
-    var navBarHeightPx by remember { mutableStateOf(0) }
-    val navBarHeightDp = with(LocalDensity.current) { navBarHeightPx.toDp() }
+    // Previously measured the floating pill's own rendered height via
+    // onGloballyPositioned and fed that back in as bottom padding for the
+    // Telegram card — but that value starts at 0 on first composition and
+    // only updates a frame *after* the card (which needs it) has already
+    // laid out with zero clearance. Compute the pill's real footprint
+    // directly instead: its fixed 68dp height, its own 8dp top/bottom
+    // padding (ScanAppBottomNav), plus the real OS navigation-bar inset.
+    // This is correct immediately, with no dependency on measurement order.
+    val navBarHeightDp = 68.dp + 16.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     Scaffold(
         // Match HomeScreen: don't let Scaffold reserve an opaque
@@ -405,9 +406,7 @@ fun BackupScreen(
         onToolsClick = onToolsClick,
         onSettingsClick = onSettingsClick,
         onBackupClick = {},
-        modifier = Modifier
-            .align(Alignment.BottomCenter)
-            .onGloballyPositioned { navBarHeightPx = it.size.height }
+        modifier = Modifier.align(Alignment.BottomCenter)
     )
     }
     }
