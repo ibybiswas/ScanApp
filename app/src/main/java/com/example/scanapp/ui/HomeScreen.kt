@@ -54,6 +54,9 @@ import com.example.scanapp.export.OutputFormat
 import com.example.scanapp.data.DocumentSortBy
 import com.example.scanapp.data.SortDirection
 
+// Explicit import to fix the build failure
+import com.example.scanapp.ui.ThemeMode
+
 data class RecentDocument(
     val id: String,
     val title: String,
@@ -302,7 +305,7 @@ fun HomeScreen(
                 }
             }
 
-            // Absolutely transparent background area behind header text and status bar icons
+            // Header background is always fully transparent; only its text/icons remain visible.
             Surface(
                 color = Color.Transparent,
                 modifier = Modifier
@@ -310,11 +313,12 @@ fun HomeScreen(
                     .align(Alignment.TopStart)
                     .onGloballyPositioned { headerHeightPx = it.size.height }
             ) {
+                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .then(if (!selectionMode) Modifier.statusBarsPadding() else Modifier)
-                        .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 0.dp), // Cut down to 0.dp
+                        .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 0.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (searchExpanded) {
@@ -413,6 +417,7 @@ fun HomeScreen(
                         }
                     }
                 }
+                }
             }
 
             ScanAppBottomNav(
@@ -475,4 +480,338 @@ fun HomeScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { deleteMultipleConfirm =
+                TextButton(onClick = { deleteMultipleConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    shareTarget?.let { doc ->
+        ShareFormatSheet(
+            onFormatSelected = { format -> shareTarget = null; onShare(doc, format); clearSelection() },
+            onDismiss = { shareTarget = null }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SortMenu(
+    expanded: Boolean,
+    sortBy: DocumentSortBy,
+    direction: SortDirection,
+    onDismiss: () -> Unit,
+    onSelect: (DocumentSortBy, SortDirection) -> Unit
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        Text(
+            "Sort by",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+        )
+        SortMenuItem("Name (A–Z)", sortBy == DocumentSortBy.NAME && direction == SortDirection.ASCENDING) {
+            onSelect(DocumentSortBy.NAME, SortDirection.ASCENDING)
+        }
+        SortMenuItem("Name (Z–A)", sortBy == DocumentSortBy.NAME && direction == SortDirection.DESCENDING) {
+            onSelect(DocumentSortBy.NAME, SortDirection.DESCENDING)
+        }
+        SortMenuItem(
+            "Date modified (newest)",
+            sortBy == DocumentSortBy.DATE_MODIFIED && direction == SortDirection.DESCENDING
+        ) { onSelect(DocumentSortBy.DATE_MODIFIED, SortDirection.DESCENDING) }
+        SortMenuItem(
+            "Date modified (oldest)",
+            sortBy == DocumentSortBy.DATE_MODIFIED && direction == SortDirection.ASCENDING
+        ) { onSelect(DocumentSortBy.DATE_MODIFIED, SortDirection.ASCENDING) }
+        SortMenuItem(
+            "Page count (most)",
+            sortBy == DocumentSortBy.PAGE_COUNT && direction == SortDirection.DESCENDING
+        ) { onSelect(DocumentSortBy.PAGE_COUNT, SortDirection.DESCENDING) }
+        SortMenuItem(
+            "Page count (fewest)",
+            sortBy == DocumentSortBy.PAGE_COUNT && direction == SortDirection.ASCENDING
+        ) { onSelect(DocumentSortBy.PAGE_COUNT, SortDirection.ASCENDING) }
+        SortMenuItem(
+            "Custom order (drag to arrange)",
+            sortBy == DocumentSortBy.MANUAL
+        ) { onSelect(DocumentSortBy.MANUAL, SortDirection.ASCENDING) }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ThemeMenu(
+    expanded: Boolean,
+    current: ThemeMode,
+    onDismiss: () -> Unit,
+    onSelect: (ThemeMode) -> Unit
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        Text(
+            "Appearance",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+        )
+        ThemeMenuItem("Light", Icons.Filled.LightMode, current == ThemeMode.LIGHT) {
+            onSelect(ThemeMode.LIGHT)
+        }
+        ThemeMenuItem("Dark", Icons.Filled.DarkMode, current == ThemeMode.DARK) {
+            onSelect(ThemeMode.DARK)
+        }
+        ThemeMenuItem("Auto (system default)", Icons.Filled.BrightnessAuto, current == ThemeMode.AUTO) {
+            onSelect(ThemeMode.AUTO)
+        }
+    }
+}
+
+@Composable
+private fun ThemeMenuItem(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    DropdownMenuItem(
+        text = { Text(label, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) },
+        leadingIcon = { Icon(icon, contentDescription = null) },
+        onClick = onClick,
+        trailingIcon = { if (selected) Icon(Icons.Filled.Check, contentDescription = null) }
+    )
+}
+
+@Composable
+private fun SortMenuItem(label: String, selected: Boolean, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) },
+        onClick = onClick,
+        trailingIcon = { if (selected) Icon(Icons.Filled.Check, contentDescription = null) }
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun RecentDocumentRow(
+    doc: RecentDocument,
+    selectionMode: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onMoreClick: () -> Unit,
+    showDragHandle: Boolean = false,
+    onDragStart: () -> Unit = {},
+    onDrag: (Float) -> Unit = {},
+    onDragEnd: () -> Unit = {}
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (selectionMode) {
+            Checkbox(checked = selected, onCheckedChange = { onClick() })
+            Spacer(Modifier.width(4.dp))
+        }
+
+        Box(
+            modifier = Modifier
+                .size(84.dp)
+                .clip(RoundedCornerShape(14.dp))
+        ) {
+            if (doc.thumbnailUri != null) {
+                Image(
+                    painter = rememberAsyncImagePainter(doc.thumbnailUri),
+                    contentDescription = doc.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Filled.Description, contentDescription = null)
+                }
+            }
+        }
+
+        Spacer(Modifier.width(16.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(doc.title, style = MaterialTheme.typography.titleMedium, maxLines = 2)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                doc.subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        if (showDragHandle) {
+            Icon(
+                Icons.Filled.DragHandle,
+                contentDescription = "Drag to reorder",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .padding(8.dp)
+                    .pointerInput(doc.id) {
+                        detectDragGestures(
+                            onDragStart = { onDragStart() },
+                            onDragEnd = { onDragEnd() },
+                            onDragCancel = { onDragEnd() },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                onDrag(dragAmount.y)
+                            }
+                        )
+                    }
+            )
+        } else if (!selectionMode) {
+            IconButton(onClick = onMoreClick) {
+                Icon(Icons.Filled.MoreVert, contentDescription = "More options")
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyRecentsState(modifier: Modifier = Modifier, isSearching: Boolean = false) {
+    Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                if (isSearching) Icons.Filled.Search else Icons.Filled.Description,
+                contentDescription = null,
+                modifier = Modifier.size(48.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (isSearching) "No documents match your search" else "No scans yet — tap the camera button to start",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+internal fun ScanAppBottomNav(
+    modifier: Modifier = Modifier,
+    selectedIndex: Int = 0,
+    onHomeClick: () -> Unit = {},
+    onSettingsClick: () -> Unit = {},
+    onToolsClick: () -> Unit = {},
+    onBackupClick: () -> Unit = {}
+) {
+    val items = listOf(
+        Triple("Home", Icons.Filled.Home, 0),
+        Triple("Tools", Icons.Filled.Description, 1),
+        Triple("Backup", Icons.Filled.Folder, 2),
+        Triple("Settings", Icons.Filled.Settings, 3)
+    )
+
+    NavigationBar(
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 0.dp,
+        windowInsets = WindowInsets(0, 0, 0, 0),
+        modifier = modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .height(68.dp)
+            .clip(RoundedCornerShape(28.dp))
+    ) {
+        items.forEach { (label, icon, index) ->
+            NavigationBarItem(
+                selected = selectedIndex == index,
+                onClick = {
+                    when (index) {
+                        0 -> onHomeClick()
+                        1 -> onToolsClick()
+                        2 -> onBackupClick()
+                        3 -> onSettingsClick()
+                    }
+                },
+                icon = { Icon(icon, contentDescription = label) },
+                label = { Text(label) },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DocumentActionSheet(
+    onDismiss: () -> Unit,
+    onRenameClick: () -> Unit,
+    onDeleteClick: () -> Unit,
+    onShareClick: () -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(modifier = Modifier.padding(bottom = 24.dp)) {
+            ListItem(
+                headlineContent = { Text("Share") },
+                leadingContent = { Icon(Icons.Filled.Share, contentDescription = null) },
+                modifier = Modifier.clickable(onClick = onShareClick)
+            )
+            ListItem(
+                headlineContent = { Text("Rename") },
+                leadingContent = { Icon(Icons.Filled.Edit, contentDescription = null) },
+                modifier = Modifier.clickable(onClick = onRenameClick)
+            )
+            ListItem(
+                headlineContent = { Text("Delete") },
+                leadingContent = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                modifier = Modifier.clickable(onClick = onDeleteClick)
+            )
+        }
+    }
+}
+
+@Composable
+private fun RenameDialog(currentTitle: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+    var text by remember(currentTitle) { mutableStateOf(currentTitle) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename document") },
+        text = {
+            OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true)
+        },
+        confirmButton = {
+            TextButton(onClick = { if (text.isNotBlank()) onConfirm(text) }) { Text("Rename") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ShareFormatSheet(onFormatSelected: (OutputFormat) -> Unit, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(modifier = Modifier.padding(16.dp).padding(bottom = 24.dp)) {
+            Text("Share as", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(12.dp))
+            ListItem(
+                headlineContent = { Text("PDF") },
+                supportingContent = { Text("All pages combined into one PDF") },
+                modifier = Modifier.clickable { onFormatSelected(OutputFormat.PDF) }
+            )
+            ListItem(
+                headlineContent = { Text("JPEG images") },
+                supportingContent = { Text("Each page as a separate image") },
+                modifier = Modifier.clickable { onFormatSelected(OutputFormat.JPEG) }
+            )
+        }
+    }
+}
