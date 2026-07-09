@@ -77,6 +77,13 @@ private val LightColors = lightColorScheme(
     onSecondaryContainer = androidx.compose.ui.graphics.Color(0xFF181A2C),
     tertiary = androidx.compose.ui.graphics.Color(0xFF75546F),
     onTertiary = androidx.compose.ui.graphics.Color(0xFFFFFFFF),
+    // Explicitly pinned to match surface — left unset, Material3 falls back
+    // to its own baseline neutral tone instead of our custom surface color.
+    // That mismatch is invisible where content (cards, thumbnails) covers
+    // the background, but shows up as a visibly different-toned patch
+    // anywhere raw background is exposed (e.g. Backup's plain layout).
+    background = androidx.compose.ui.graphics.Color(0xFFFEF8FF),
+    onBackground = androidx.compose.ui.graphics.Color(0xFF1D1B20),
     surface = androidx.compose.ui.graphics.Color(0xFFFEF8FF),
     onSurface = androidx.compose.ui.graphics.Color(0xFF1D1B20),
     surfaceVariant = androidx.compose.ui.graphics.Color(0xFFE2E1EC),
@@ -94,6 +101,13 @@ private val DarkColors = darkColorScheme(
     onSecondaryContainer = androidx.compose.ui.graphics.Color(0xFFE0E1F9),
     tertiary = androidx.compose.ui.graphics.Color(0xFFE4BBDB),
     onTertiary = androidx.compose.ui.graphics.Color(0xFF442740),
+    // Same fix as LightColors above — pin background to the same value as
+    // surface instead of letting it silently default to Material3's
+    // baseline dark neutral (~#1C1B1F), which doesn't match our custom
+    // surface (#151318) and was showing up as an "opaque" mismatched patch
+    // wherever raw background was exposed.
+    background = androidx.compose.ui.graphics.Color(0xFF151318),
+    onBackground = androidx.compose.ui.graphics.Color(0xFFE6E1E6),
     surface = androidx.compose.ui.graphics.Color(0xFF151318),
     onSurface = androidx.compose.ui.graphics.Color(0xFFE6E1E6),
     surfaceVariant = androidx.compose.ui.graphics.Color(0xFF45464F),
