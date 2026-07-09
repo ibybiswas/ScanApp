@@ -143,7 +143,11 @@ fun BackupScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .statusBarsPadding()
+            // statusBarsPadding() alone can come up short on devices with a
+            // punch-hole/notch camera (the cutout isn't always fully covered
+            // by the reported status bar inset) — union in displayCutout too
+            // so the title never clips under it.
+            .windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout))
             .padding(horizontal = 16.dp, vertical = 16.dp)
             .verticalScroll(scrollState),
         verticalArrangement = Arrangement.spacedBy(16.dp)
