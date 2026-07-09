@@ -16,6 +16,41 @@ jobs:
         with:
           fetch-depth: 0   # full history + tags, needed to diff against the previous release for the changelog
 
+      - name: Bump app version
+        id: bump_version
+        # Auto-bumps the human-facing versionName on every release dispatch,
+        # so nobody has to remember to hand-edit app/build.gradle.kts first.
+        # Rolls PATCH 0→9, then MINOR bumps and PATCH resets to 0:
+        #   1.1.0 → 1.1.1 → … → 1.1.9 → 1.2.0 → 1.2.1 → …
+        # MAJOR is never touched automatically — bump it by hand in
+        # build.gradle.kts when you actually want a major version change.
+        # This step's commit becomes the new source of truth for
+        # appVersionName from here on (both for this build and every one
+        # after it).
+        run: |
+          CURRENT=$(grep -oP 'val appVersionName = "\K[^"]+' app/build.gradle.kts)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+          if [ "$PATCH" -ge 9 ]; then
+            PATCH=0
+            MINOR=$((MINOR + 1))
+          else
+            PATCH=$((PATCH + 1))
+          fi
+
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          echo "Bumping version: $CURRENT -> $NEW_VERSION"
+
+          sed -i "s/val appVersionName = \"${CURRENT}\"/val appVersionName = \"${NEW_VERSION}\"/" app/build.gradle.kts
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/build.gradle.kts
+          git commit -m "chore: bump version to ${NEW_VERSION} [skip ci]"
+          git push origin HEAD:"${GITHUB_REF_NAME}"
+
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -72,12 +107,12 @@ jobs:
 
       - name: Generate release tag
         id: tag
-        # Tagged as v1.0.<run_number> to match the APK's own versionName
-        # exactly (see app/build.gradle.kts). UpdateChecker compares this tag
-        # directly against BuildConfig.VERSION_NAME, so the two must agree —
-        # they used to be unrelated strings ("build-N" vs "1.0"), which is why
-        # the in-app update check could never detect a newer release.
-        run: echo "tag=v1.0.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+        # Uses the version this run itself just bumped to (see "Bump app
+        # version" above) rather than re-reading the file, so there's no
+        # chance of the tag and this build's actual versionName disagreeing.
+        # UpdateChecker compares this tag numerically against
+        # BuildConfig.VERSION_NAME, so the two must agree.
+        run: echo "tag=v${{ steps.bump_version.outputs.version }}" >> "$GITHUB_OUTPUT"
 
       - name: Generate changelog
         id: changelog
