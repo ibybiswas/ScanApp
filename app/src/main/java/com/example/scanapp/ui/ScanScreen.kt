@@ -5,6 +5,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -60,47 +61,29 @@ fun ScanScreen(
     onScanClick: () -> Unit,
     onExportClick: (ExportUiState) -> Unit,
     onBackClick: () -> Unit = {},
-    // Hoisted so the caller (MainActivity) can persist these across screen
-    // switches — previously these lived in `remember` blocks scoped to this
-    // composable, so every time the user left and re-entered this screen
-    // (e.g. Detail -> Export -> back -> Export again) the size limit, unit,
-    // and filename silently reset to their defaults.
     initialUiState: ExportUiState = ExportUiState(),
     initialUseSizeLimit: Boolean = true,
     initialSizeUnit: SizeUnit = SizeUnit.KB,
     initialSizeText: String = "500",
     onExportUiStateChange: (ExportUiState, useSizeLimit: Boolean, sizeUnit: SizeUnit, sizeText: String) -> Unit = { _, _, _, _ -> },
-    // Reads a scanned page's real pixel width/height/DPI off the main thread so the
-    // resolution fields can be pre-filled with the source image's current values.
     fetchImageInfo: suspend (Uri) -> Triple<Int, Int, Int>? = { null }
 ) {
     var uiState by remember { mutableStateOf(initialUiState) }
     var useSizeLimit by remember { mutableStateOf(initialUseSizeLimit) }
     var sizeUnit by remember { mutableStateOf(initialSizeUnit) }
-    // What's actually typed in the box, kept as text so partial/invalid entry
-    // (like "" or "1.") doesn't get force-corrected while the user is mid-edit.
     var sizeText by remember { mutableStateOf(initialSizeText) }
 
-    // Reports every change back up to the caller immediately so the latest
-    // values are always available to persist, regardless of whether the user
-    // eventually taps Export or just navigates away.
     fun reportChange() {
         onExportUiStateChange(uiState, useSizeLimit, sizeUnit, sizeText)
     }
 
-    // Resolution/DPI text fields — kept as strings for the same reason as sizeText
-    // (mid-edit states like "" shouldn't get force-corrected).
     var widthText by remember { mutableStateOf(initialUiState.customWidth?.toString() ?: "") }
     var heightText by remember { mutableStateOf(initialUiState.customHeight?.toString() ?: "") }
     var dpiText by remember { mutableStateOf(initialUiState.dpi?.toString() ?: "") }
     var resolutionUnit by remember { mutableStateOf(LengthUnit.PX) }
-    // Master on/off for the whole section. Off = export uses the scan's original
-    // resolution/DPI untouched; uiState.customWidth/customHeight/dpi stay null.
     var resolutionEnabled by remember {
         mutableStateOf(initialUiState.customWidth != null || initialUiState.dpi != null)
     }
-    // Tracks whether the user has touched the resolution fields yet, so the one-time
-    // "fetch current width/height/dpi" prefill doesn't clobber their edits later.
     var hasPrefilledResolution by remember { mutableStateOf(initialUiState.customWidth != null) }
 
     LaunchedEffect(scannedPages.firstOrNull()) {
@@ -118,8 +101,6 @@ fun ScanScreen(
         }
     }
 
-    // dpi used just for unit math (cm/inch <-> px); falls back to a sane default
-    // while the DPI field is blank/invalid so conversions never divide by zero.
     fun activeDpiForConversion(): Int = dpiText.toIntOrNull()?.takeIf { it > 0 } ?: 96
 
     fun applyWidthText(text: String) {
@@ -138,8 +119,6 @@ fun ScanScreen(
         dpiText = text
         val newDpi = text.toIntOrNull()?.takeIf { it > 0 }
         uiState = uiState.copy(dpi = newDpi)
-        // If we're displaying physical units, changing DPI resamples the pixel count
-        // so the shown cm/inch size stays put rather than silently drifting.
         if (resolutionUnit != LengthUnit.PX && newDpi != null) {
             uiState = uiState.copy(
                 customWidth = lengthToPx(widthText, resolutionUnit, newDpi),
@@ -185,9 +164,6 @@ fun ScanScreen(
         reportChange()
     }
 
-    // Tracks whether we've already "consumed" the current exportResultText for
-    // popup purposes, so the popup doesn't immediately re-trigger after its own
-    // auto-dismiss sets nothing else changing. Keyed on the text's identity.
     var lastShownResult by remember { mutableStateOf<String?>(null) }
     var showPopup by remember { mutableStateOf(false) }
 
@@ -201,11 +177,21 @@ fun ScanScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background) // Fixes navbar area opacity
+    ) {
         Scaffold(
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            colors = ScaffoldDefaults.colors(containerColor = Color.Transparent),
             topBar = {
                 TopAppBar(
                     title = { Text("Scan & Export") },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = Color.Transparent
+                    ),
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -233,17 +219,18 @@ fun ScanScreen(
             Column(
                 modifier = Modifier
                     .padding(padding)
-                    .padding(16.dp)
+                    .padding(horizontal = 16.dp)
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
             ) {
+                Spacer(Modifier.height(8.dp)) // Minimum functional spacer
+
                 Button(onClick = onScanClick, modifier = Modifier.fillMaxWidth()) {
                     Text(if (scannedPages.isEmpty()) "Scan Document" else "Scan More Pages")
                 }
 
-                Spacer(Modifier.height(16.dp))
-
                 if (scannedPages.isNotEmpty()) {
+                    Spacer(Modifier.height(16.dp))
                     Text("Pages (${scannedPages.size})", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
                     LazyRow {
@@ -258,7 +245,7 @@ fun ScanScreen(
                         }
                     }
 
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(16.dp))
                     HorizontalDivider()
                     Spacer(Modifier.height(16.dp))
 
@@ -282,7 +269,6 @@ fun ScanScreen(
 
                     Spacer(Modifier.height(16.dp))
 
-                    // File name input
                     OutlinedTextField(
                         value = uiState.fileName,
                         onValueChange = { uiState = uiState.copy(fileName = it); reportChange() },
@@ -418,8 +404,6 @@ fun ScanScreen(
                     if (useSizeLimit) {
                         Spacer(Modifier.height(8.dp))
 
-                        // Exact-value input box + unit toggle (KB/MB) — the precise control.
-                        // The slider below is the quick control; both stay in sync.
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             OutlinedTextField(
                                 value = sizeText,
@@ -495,19 +479,7 @@ fun ScanScreen(
                         )
                     }
 
-                    Spacer(Modifier.height(24.dp))
-
-                    Button(
-                        onClick = { onExportClick(uiState) },
-                        enabled = !isExporting,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        if (isExporting) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                        } else {
-                            Text("Export")
-                        }
-                    }
+                    Spacer(Modifier.height(100.dp)) // Clears floating action button space
                 }
             }
         }
@@ -537,8 +509,6 @@ private fun ExportConfirmationPopup(
         label = "popupAlpha"
     )
 
-    // Keep the Surface composed through its fade/scale-out, not just while
-    // `visible` is true — otherwise it vanishes instantly instead of animating out.
     var hasBeenShown by remember { mutableStateOf(false) }
     LaunchedEffect(visible) { if (visible) hasBeenShown = true }
 
@@ -669,10 +639,8 @@ private fun estimateImageBytes(width: Int, height: Int, format: OutputFormat, qu
     if (width <= 0 || height <= 0) return 0L
     val pixels = width.toLong() * height.toLong()
     val bitsPerPixel = if (format == OutputFormat.PNG) {
-        // PNG is lossless; scanned documents (mostly flat white + text) compress well in practice.
         2.5
     } else {
-        // JPEG: bits/pixel grows non-linearly with quality.
         0.1 + Math.pow(quality / 100.0, 1.5) * 2.9
     }
     return (pixels * bitsPerPixel / 8.0).toLong()
