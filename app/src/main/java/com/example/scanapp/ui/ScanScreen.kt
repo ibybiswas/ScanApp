@@ -25,6 +25,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -92,7 +94,7 @@ fun ScanScreen(
         val info = fetchImageInfo(firstPage) ?: return@LaunchedEffect
         val (w, h, dpi) = info
         widthText = w.toString()
-        heightText = h.toString()
+        heightText = w.toString() // match prefill logic
         dpiText = dpi.toString()
         hasPrefilledResolution = true
         if (resolutionEnabled) {
@@ -177,6 +179,9 @@ fun ScanScreen(
         }
     }
 
+    var headerHeightPx by remember { mutableStateOf(0) }
+    val headerHeightDp = with(LocalDensity.current) { headerHeightPx.toDp() }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -184,21 +189,7 @@ fun ScanScreen(
     ) {
         Scaffold(
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            containerColor = Color.Transparent, // Correct implementation for M3 Scaffold
-            topBar = {
-                TopAppBar(
-                    title = { Text("Scan & Export") },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent,
-                        scrolledContainerColor = Color.Transparent
-                    ),
-                    navigationIcon = {
-                        IconButton(onClick = onBackClick) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    }
-                )
-            },
+            containerColor = Color.Transparent,
             floatingActionButton = {
                 if (scannedPages.isNotEmpty()) {
                     ExtendedFloatingActionButton(
@@ -223,7 +214,8 @@ fun ScanScreen(
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
             ) {
-                Spacer(Modifier.height(8.dp))
+                // Reserves perfect clearance for the glass header overlay item
+                Spacer(Modifier.height(headerHeightDp + 8.dp))
 
                 Button(onClick = onScanClick, modifier = Modifier.fillMaxWidth()) {
                     Text(if (scannedPages.isEmpty()) "Scan Document" else "Scan More Pages")
@@ -231,7 +223,7 @@ fun ScanScreen(
 
                 if (scannedPages.isNotEmpty()) {
                     Spacer(Modifier.height(16.dp))
-                    Text("Pages (${scannedPages.size})", style = MaterialTheme.typography.titleMedium)
+                    Text("Pages (${scannedPages.size})", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                     Spacer(Modifier.height(8.dp))
                     LazyRow {
                         items(scannedPages) { uri ->
@@ -249,7 +241,7 @@ fun ScanScreen(
                     HorizontalDivider()
                     Spacer(Modifier.height(16.dp))
 
-                    Text("Output format", style = MaterialTheme.typography.titleMedium)
+                    Text("Output format", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         FormatChip("PDF", uiState.format == OutputFormat.PDF) {
                             uiState = uiState.copy(format = OutputFormat.PDF)
@@ -288,7 +280,7 @@ fun ScanScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Resolution & DPI", style = MaterialTheme.typography.titleMedium)
+                            Text("Resolution & DPI", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                             Switch(
                                 checked = resolutionEnabled,
                                 onCheckedChange = { checked -> setResolutionEnabled(checked) }
@@ -305,7 +297,7 @@ fun ScanScreen(
                             Spacer(Modifier.height(8.dp))
 
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Unit:", style = MaterialTheme.typography.bodySmall)
+                                Text("Unit:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
                                 Spacer(Modifier.width(8.dp))
                                 SegmentedLengthUnitToggle(
                                     selected = resolutionUnit,
@@ -325,7 +317,7 @@ fun ScanScreen(
                                     modifier = Modifier.weight(1f)
                                 )
                                 Spacer(Modifier.width(8.dp))
-                                Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.width(8.dp))
                                 OutlinedTextField(
                                     value = heightText,
@@ -387,7 +379,7 @@ fun ScanScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Limit file size", style = MaterialTheme.typography.titleMedium)
+                        Text("Limit file size", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                         Switch(
                             checked = useSizeLimit,
                             onCheckedChange = { checked ->
@@ -442,12 +434,13 @@ fun ScanScreen(
 
                         Text(
                             "The app will reduce quality (and resolution if needed) to fit this size.",
-                            style = MaterialTheme.typography.bodySmall
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
                         Spacer(Modifier.height(16.dp))
 
-                        Text("Compression style", style = MaterialTheme.typography.titleSmall)
+                        Text("Compression style", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
                         Spacer(Modifier.height(6.dp))
                         Column(modifier = Modifier.fillMaxWidth()) {
                             CompressionStrategyOption(
@@ -471,7 +464,7 @@ fun ScanScreen(
                             )
                         }
                     } else {
-                        Text("Quality: ${uiState.quality}")
+                        Text("Quality: ${uiState.quality}", color = MaterialTheme.colorScheme.onSurface)
                         Slider(
                             value = uiState.quality.toFloat(),
                             onValueChange = { uiState = uiState.copy(quality = it.toInt()); reportChange() },
@@ -480,6 +473,47 @@ fun ScanScreen(
                     }
 
                     Spacer(Modifier.height(100.dp))
+                }
+            }
+        }
+
+        // Absolutely transparent header containing floating liquid glass pill container
+        Surface(
+            color = Color.Transparent,
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .onGloballyPositioned { headerHeightPx = it.size.height }
+        ) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
+                shape = RoundedCornerShape(24.dp),
+                tonalElevation = 6.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onBackClick) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack, 
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        "Scan & Export",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
                 }
             }
         }
@@ -537,7 +571,8 @@ private fun ExportConfirmationPopup(
             Spacer(Modifier.height(12.dp))
             Text(
                 if (isError) "Export failed" else "Export complete",
-                style = MaterialTheme.typography.titleMedium
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
             )
             Spacer(Modifier.height(4.dp))
             Text(
@@ -590,7 +625,7 @@ private fun CompressionStrategyOption(
             RadioButton(selected = selected, onClick = onClick)
             Spacer(Modifier.width(8.dp))
             Column {
-                Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
