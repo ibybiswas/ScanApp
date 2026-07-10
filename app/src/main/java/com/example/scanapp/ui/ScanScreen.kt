@@ -5,6 +5,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -24,6 +25,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -60,47 +63,29 @@ fun ScanScreen(
     onScanClick: () -> Unit,
     onExportClick: (ExportUiState) -> Unit,
     onBackClick: () -> Unit = {},
-    // Hoisted so the caller (MainActivity) can persist these across screen
-    // switches — previously these lived in `remember` blocks scoped to this
-    // composable, so every time the user left and re-entered this screen
-    // (e.g. Detail -> Export -> back -> Export again) the size limit, unit,
-    // and filename silently reset to their defaults.
     initialUiState: ExportUiState = ExportUiState(),
     initialUseSizeLimit: Boolean = true,
     initialSizeUnit: SizeUnit = SizeUnit.KB,
     initialSizeText: String = "500",
     onExportUiStateChange: (ExportUiState, useSizeLimit: Boolean, sizeUnit: SizeUnit, sizeText: String) -> Unit = { _, _, _, _ -> },
-    // Reads a scanned page's real pixel width/height/DPI off the main thread so the
-    // resolution fields can be pre-filled with the source image's current values.
     fetchImageInfo: suspend (Uri) -> Triple<Int, Int, Int>? = { null }
 ) {
     var uiState by remember { mutableStateOf(initialUiState) }
     var useSizeLimit by remember { mutableStateOf(initialUseSizeLimit) }
     var sizeUnit by remember { mutableStateOf(initialSizeUnit) }
-    // What's actually typed in the box, kept as text so partial/invalid entry
-    // (like "" or "1.") doesn't get force-corrected while the user is mid-edit.
     var sizeText by remember { mutableStateOf(initialSizeText) }
 
-    // Reports every change back up to the caller immediately so the latest
-    // values are always available to persist, regardless of whether the user
-    // eventually taps Export or just navigates away.
     fun reportChange() {
         onExportUiStateChange(uiState, useSizeLimit, sizeUnit, sizeText)
     }
 
-    // Resolution/DPI text fields — kept as strings for the same reason as sizeText
-    // (mid-edit states like "" shouldn't get force-corrected).
     var widthText by remember { mutableStateOf(initialUiState.customWidth?.toString() ?: "") }
     var heightText by remember { mutableStateOf(initialUiState.customHeight?.toString() ?: "") }
     var dpiText by remember { mutableStateOf(initialUiState.dpi?.toString() ?: "") }
     var resolutionUnit by remember { mutableStateOf(LengthUnit.PX) }
-    // Master on/off for the whole section. Off = export uses the scan's original
-    // resolution/DPI untouched; uiState.customWidth/customHeight/dpi stay null.
     var resolutionEnabled by remember {
         mutableStateOf(initialUiState.customWidth != null || initialUiState.dpi != null)
     }
-    // Tracks whether the user has touched the resolution fields yet, so the one-time
-    // "fetch current width/height/dpi" prefill doesn't clobber their edits later.
     var hasPrefilledResolution by remember { mutableStateOf(initialUiState.customWidth != null) }
 
     LaunchedEffect(scannedPages.firstOrNull()) {
@@ -109,7 +94,7 @@ fun ScanScreen(
         val info = fetchImageInfo(firstPage) ?: return@LaunchedEffect
         val (w, h, dpi) = info
         widthText = w.toString()
-        heightText = h.toString()
+        heightText = w.toString()
         dpiText = dpi.toString()
         hasPrefilledResolution = true
         if (resolutionEnabled) {
@@ -118,8 +103,6 @@ fun ScanScreen(
         }
     }
 
-    // dpi used just for unit math (cm/inch <-> px); falls back to a sane default
-    // while the DPI field is blank/invalid so conversions never divide by zero.
     fun activeDpiForConversion(): Int = dpiText.toIntOrNull()?.takeIf { it > 0 } ?: 96
 
     fun applyWidthText(text: String) {
@@ -138,8 +121,6 @@ fun ScanScreen(
         dpiText = text
         val newDpi = text.toIntOrNull()?.takeIf { it > 0 }
         uiState = uiState.copy(dpi = newDpi)
-        // If we're displaying physical units, changing DPI resamples the pixel count
-        // so the shown cm/inch size stays put rather than silently drifting.
         if (resolutionUnit != LengthUnit.PX && newDpi != null) {
             uiState = uiState.copy(
                 customWidth = lengthToPx(widthText, resolutionUnit, newDpi),
@@ -185,9 +166,6 @@ fun ScanScreen(
         reportChange()
     }
 
-    // Tracks whether we've already "consumed" the current exportResultText for
-    // popup purposes, so the popup doesn't immediately re-trigger after its own
-    // auto-dismiss sets nothing else changing. Keyed on the text's identity.
     var lastShownResult by remember { mutableStateOf<String?>(null) }
     var showPopup by remember { mutableStateOf(false) }
 
@@ -201,18 +179,17 @@ fun ScanScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    var headerHeightPx by remember { mutableStateOf(0) }
+    val headerHeightDp = with(LocalDensity.current) { headerHeightPx.toDp() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
         Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("Scan & Export") },
-                    navigationIcon = {
-                        IconButton(onClick = onBackClick) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    }
-                )
-            },
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            containerColor = Color.Transparent,
             floatingActionButton = {
                 if (scannedPages.isNotEmpty()) {
                     ExtendedFloatingActionButton(
@@ -225,7 +202,10 @@ fun ScanScreen(
                             }
                         },
                         text = { Text(if (isExporting) "Exporting…" else "Export") },
-                        expanded = !isExporting
+                        expanded = !isExporting,
+                        modifier = Modifier
+                            .imePadding() // Automatically forces button upward when keyboard opens
+                            .padding(bottom = 76.dp) // Pushes floating button to your exact targeted arrow height when idle
                     )
                 }
             }
@@ -233,18 +213,20 @@ fun ScanScreen(
             Column(
                 modifier = Modifier
                     .padding(padding)
-                    .padding(16.dp)
+                    .padding(horizontal = 16.dp)
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
             ) {
+                // Increased clearance to pull "Scan More Pages" completely lower below the header text
+                Spacer(Modifier.height(headerHeightDp + 36.dp))
+
                 Button(onClick = onScanClick, modifier = Modifier.fillMaxWidth()) {
                     Text(if (scannedPages.isEmpty()) "Scan Document" else "Scan More Pages")
                 }
 
-                Spacer(Modifier.height(16.dp))
-
                 if (scannedPages.isNotEmpty()) {
-                    Text("Pages (${scannedPages.size})", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(16.dp))
+                    Text("Pages (${scannedPages.size})", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                     Spacer(Modifier.height(8.dp))
                     LazyRow {
                         items(scannedPages) { uri ->
@@ -258,11 +240,11 @@ fun ScanScreen(
                         }
                     }
 
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(16.dp))
                     HorizontalDivider()
                     Spacer(Modifier.height(16.dp))
 
-                    Text("Output format", style = MaterialTheme.typography.titleMedium)
+                    Text("Output format", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         FormatChip("PDF", uiState.format == OutputFormat.PDF) {
                             uiState = uiState.copy(format = OutputFormat.PDF)
@@ -282,7 +264,6 @@ fun ScanScreen(
 
                     Spacer(Modifier.height(16.dp))
 
-                    // File name input
                     OutlinedTextField(
                         value = uiState.fileName,
                         onValueChange = { uiState = uiState.copy(fileName = it); reportChange() },
@@ -302,7 +283,7 @@ fun ScanScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Resolution & DPI", style = MaterialTheme.typography.titleMedium)
+                            Text("Resolution & DPI", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                             Switch(
                                 checked = resolutionEnabled,
                                 onCheckedChange = { checked -> setResolutionEnabled(checked) }
@@ -319,7 +300,7 @@ fun ScanScreen(
                             Spacer(Modifier.height(8.dp))
 
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Unit:", style = MaterialTheme.typography.bodySmall)
+                                Text("Unit:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
                                 Spacer(Modifier.width(8.dp))
                                 SegmentedLengthUnitToggle(
                                     selected = resolutionUnit,
@@ -339,7 +320,7 @@ fun ScanScreen(
                                     modifier = Modifier.weight(1f)
                                 )
                                 Spacer(Modifier.width(8.dp))
-                                Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.width(8.dp))
                                 OutlinedTextField(
                                     value = heightText,
@@ -401,7 +382,7 @@ fun ScanScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Limit file size", style = MaterialTheme.typography.titleMedium)
+                        Text("Limit file size", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                         Switch(
                             checked = useSizeLimit,
                             onCheckedChange = { checked ->
@@ -418,8 +399,6 @@ fun ScanScreen(
                     if (useSizeLimit) {
                         Spacer(Modifier.height(8.dp))
 
-                        // Exact-value input box + unit toggle (KB/MB) — the precise control.
-                        // The slider below is the quick control; both stay in sync.
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             OutlinedTextField(
                                 value = sizeText,
@@ -458,12 +437,13 @@ fun ScanScreen(
 
                         Text(
                             "The app will reduce quality (and resolution if needed) to fit this size.",
-                            style = MaterialTheme.typography.bodySmall
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
                         Spacer(Modifier.height(16.dp))
 
-                        Text("Compression style", style = MaterialTheme.typography.titleSmall)
+                        Text("Compression style", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
                         Spacer(Modifier.height(6.dp))
                         Column(modifier = Modifier.fillMaxWidth()) {
                             CompressionStrategyOption(
@@ -487,7 +467,7 @@ fun ScanScreen(
                             )
                         }
                     } else {
-                        Text("Quality: ${uiState.quality}")
+                        Text("Quality: ${uiState.quality}", color = MaterialTheme.colorScheme.onSurface)
                         Slider(
                             value = uiState.quality.toFloat(),
                             onValueChange = { uiState = uiState.copy(quality = it.toInt()); reportChange() },
@@ -495,19 +475,48 @@ fun ScanScreen(
                         )
                     }
 
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(160.dp)) // Extra layout clearance space over raised FAB items
+                }
+            }
+        }
 
-                    Button(
-                        onClick = { onExportClick(uiState) },
-                        enabled = !isExporting,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        if (isExporting) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                        } else {
-                            Text("Export")
-                        }
+        // Floating dynamic liquid glass header panel banner row selection element
+        Surface(
+            color = Color.Transparent,
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .onGloballyPositioned { headerHeightPx = it.size.height }
+        ) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
+                shape = RoundedCornerShape(24.dp),
+                tonalElevation = 6.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onBackClick) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack, 
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
                     }
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        "Scan & Export",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
                 }
             }
         }
@@ -537,8 +546,6 @@ private fun ExportConfirmationPopup(
         label = "popupAlpha"
     )
 
-    // Keep the Surface composed through its fade/scale-out, not just while
-    // `visible` is true — otherwise it vanishes instantly instead of animating out.
     var hasBeenShown by remember { mutableStateOf(false) }
     LaunchedEffect(visible) { if (visible) hasBeenShown = true }
 
@@ -567,7 +574,8 @@ private fun ExportConfirmationPopup(
             Spacer(Modifier.height(12.dp))
             Text(
                 if (isError) "Export failed" else "Export complete",
-                style = MaterialTheme.typography.titleMedium
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
             )
             Spacer(Modifier.height(4.dp))
             Text(
@@ -620,7 +628,7 @@ private fun CompressionStrategyOption(
             RadioButton(selected = selected, onClick = onClick)
             Spacer(Modifier.width(8.dp))
             Column {
-                Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -669,10 +677,8 @@ private fun estimateImageBytes(width: Int, height: Int, format: OutputFormat, qu
     if (width <= 0 || height <= 0) return 0L
     val pixels = width.toLong() * height.toLong()
     val bitsPerPixel = if (format == OutputFormat.PNG) {
-        // PNG is lossless; scanned documents (mostly flat white + text) compress well in practice.
         2.5
     } else {
-        // JPEG: bits/pixel grows non-linearly with quality.
         0.1 + Math.pow(quality / 100.0, 1.5) * 2.9
     }
     return (pixels * bitsPerPixel / 8.0).toLong()
