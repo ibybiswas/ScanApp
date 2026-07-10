@@ -189,7 +189,26 @@ fun ScanScreen(
     ) {
         Scaffold(
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            containerColor = Color.Transparent
+            containerColor = Color.Transparent,
+            floatingActionButton = {
+                if (scannedPages.isNotEmpty()) {
+                    ExtendedFloatingActionButton(
+                        onClick = { if (!isExporting) onExportClick(uiState) },
+                        icon = {
+                            if (isExporting) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Filled.IosShare, contentDescription = null)
+                            }
+                        },
+                        text = { Text(if (isExporting) "Exporting…" else "Export") },
+                        expanded = !isExporting,
+                        modifier = Modifier
+                            .imePadding() // Automatically forces button upward when keyboard opens
+                            .padding(bottom = 76.dp) // Pushes floating button to your exact targeted arrow height when idle
+                    )
+                }
+            }
         ) { padding ->
             Column(
                 modifier = Modifier
@@ -198,8 +217,8 @@ fun ScanScreen(
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
             ) {
-                // Perfect vertical layout clearance safely below glass header element
-                Spacer(Modifier.height(headerHeightDp + 16.dp))
+                // Increased clearance to pull "Scan More Pages" completely lower below the header text
+                Spacer(Modifier.height(headerHeightDp + 36.dp))
 
                 Button(onClick = onScanClick, modifier = Modifier.fillMaxWidth()) {
                     Text(if (scannedPages.isEmpty()) "Scan Document" else "Scan More Pages")
@@ -455,29 +474,8 @@ fun ScanScreen(
                             valueRange = 2f..100f
                         )
                     }
-                }
 
-                // Inlined directly into scroll column layout hierarchy. This ensures the button moves 
-                // up dynamically exactly where your rectangle marks when keyboard triggers or views scale.
-                if (scannedPages.isNotEmpty()) {
-                    Spacer(Modifier.height(24.dp))
-                    ExtendedFloatingActionButton(
-                        onClick = { if (!isExporting) onExportClick(uiState) },
-                        icon = {
-                            if (isExporting) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(Icons.Filled.IosShare, contentDescription = null)
-                            }
-                        },
-                        text = { Text(if (isExporting) "Exporting…" else "Export") },
-                        expanded = !isExporting,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 32.dp)
-                    )
-                } else {
-                    Spacer(Modifier.height(32.dp))
+                    Spacer(Modifier.height(160.dp)) // Extra layout clearance space over raised FAB items
                 }
             }
         }
