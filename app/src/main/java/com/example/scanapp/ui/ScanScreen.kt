@@ -94,7 +94,7 @@ fun ScanScreen(
         val info = fetchImageInfo(firstPage) ?: return@LaunchedEffect
         val (w, h, dpi) = info
         widthText = w.toString()
-        heightText = w.toString() // match prefill logic
+        heightText = w.toString()
         dpiText = dpi.toString()
         hasPrefilledResolution = true
         if (resolutionEnabled) {
@@ -189,23 +189,7 @@ fun ScanScreen(
     ) {
         Scaffold(
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            containerColor = Color.Transparent,
-            floatingActionButton = {
-                if (scannedPages.isNotEmpty()) {
-                    ExtendedFloatingActionButton(
-                        onClick = { if (!isExporting) onExportClick(uiState) },
-                        icon = {
-                            if (isExporting) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(Icons.Filled.IosShare, contentDescription = null)
-                            }
-                        },
-                        text = { Text(if (isExporting) "Exporting…" else "Export") },
-                        expanded = !isExporting
-                    )
-                }
-            }
+            containerColor = Color.Transparent
         ) { padding ->
             Column(
                 modifier = Modifier
@@ -214,8 +198,8 @@ fun ScanScreen(
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
             ) {
-                // Reserves perfect clearance for the glass header overlay item
-                Spacer(Modifier.height(headerHeightDp + 8.dp))
+                // Perfect vertical layout clearance safely below glass header element
+                Spacer(Modifier.height(headerHeightDp + 16.dp))
 
                 Button(onClick = onScanClick, modifier = Modifier.fillMaxWidth()) {
                     Text(if (scannedPages.isEmpty()) "Scan Document" else "Scan More Pages")
@@ -471,13 +455,34 @@ fun ScanScreen(
                             valueRange = 2f..100f
                         )
                     }
+                }
 
-                    Spacer(Modifier.height(100.dp))
+                // Inlined directly into scroll column layout hierarchy. This ensures the button moves 
+                // up dynamically exactly where your rectangle marks when keyboard triggers or views scale.
+                if (scannedPages.isNotEmpty()) {
+                    Spacer(Modifier.height(24.dp))
+                    ExtendedFloatingActionButton(
+                        onClick = { if (!isExporting) onExportClick(uiState) },
+                        icon = {
+                            if (isExporting) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Filled.IosShare, contentDescription = null)
+                            }
+                        },
+                        text = { Text(if (isExporting) "Exporting…" else "Export") },
+                        expanded = !isExporting,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 32.dp)
+                    )
+                } else {
+                    Spacer(Modifier.height(32.dp))
                 }
             }
         }
 
-        // Absolutely transparent header containing floating liquid glass pill container
+        // Floating dynamic liquid glass header panel banner row selection element
         Surface(
             color = Color.Transparent,
             modifier = Modifier
