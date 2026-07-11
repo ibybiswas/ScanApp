@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -42,6 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,7 +61,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -87,12 +88,6 @@ fun DocumentDetailScreen(
     onExportSelected: (List<DetailPage>) -> Unit,
     onEditSelected: (List<DetailPage>) -> Unit
 ) {
-    var headerHeightPx by remember { mutableStateOf(0) }
-    val headerHeightDp = with(LocalDensity.current) { headerHeightPx.toDp() }
-
-    var footerHeightPx by remember { mutableStateOf(0) }
-    val footerHeightDp = with(LocalDensity.current) { footerHeightPx.toDp() }
-
     // Local, instantly-reorderable copy of the pages. Kept in sync whenever a
     // new list comes down from the caller (pages added/removed/refreshed).
     var orderedPages by remember(pages) { mutableStateOf(pages) }
@@ -119,18 +114,259 @@ fun DocumentDetailScreen(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        // We handle status/navigation bar insets ourselves inside the bars
+        // below, so Scaffold shouldn't reserve extra space for them too.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+            // 1. Liquid Glass Top Navigation Bar Configuration Overlay[cite: 1]
+            Surface(
+                color = Color.Transparent,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
+                    shape = RoundedCornerShape(24.dp),
+                    tonalElevation = 6.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = {
+                                if (isSelecting) selectedPageIds = emptySet() else onBackClick()
+                            }
+                        ) {
+                            Icon(
+                                imageVector = if (isSelecting) Icons.Filled.Close else Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = if (isSelecting) "Cancel selection" else "Back",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = if (isSelecting) "${selectedPageIds.size} selected" else title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (!isSelecting) {
+                            IconButton(onClick = { showRenameDialog = true }) {
+                                Icon(
+                                    imageVector = Icons.Filled.Edit,
+                                    contentDescription = "Rename",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Box {
+                                IconButton(onClick = { showOverflowMenu = true }) {
+                                    Icon(
+                                        imageVector = Icons.Filled.MoreVert,
+                                        contentDescription = "Options",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showOverflowMenu,
+                                    onDismissRequest = { showOverflowMenu = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Share as PDF") },
+                                        leadingIcon = {
+                                            Icon(Icons.Filled.Share, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            onShare(OutputFormat.PDF)
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Share as JPEG") },
+                                        leadingIcon = {
+                                            Icon(Icons.Filled.Share, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            onShare(OutputFormat.JPEG)
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Share as PNG") },
+                                        leadingIcon = {
+                                            Icon(Icons.Filled.Share, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            onShare(OutputFormat.PNG)
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Delete document") },
+                                        leadingIcon = {
+                                            Icon(Icons.Filled.Delete, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            showDeleteConfirm = true
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        bottomBar = {
+            // 2. Liquid Glass Unified Bottom Actions Bar Menu Overlay Dock[cite: 1]
+            Surface(
+                color = Color.Transparent,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 16.dp)
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
+                    shape = RoundedCornerShape(32.dp),
+                    tonalElevation = 8.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        if (isSelecting) {
+                            val selectedPages = orderedPages.filter { selectedPageIds.contains(it.pageId) }
+
+                            // "Edit selected" Action Button Inside the Dock
+                            Button(
+                                onClick = { onEditSelected(selectedPages) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                                ),
+                                shape = RoundedCornerShape(24.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(52.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Edit,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = "Edit",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+
+                            // "Export selected" Action Button Inside the Dock
+                            Button(
+                                onClick = { onExportSelected(selectedPages) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary
+                                ),
+                                shape = RoundedCornerShape(24.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(52.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Share,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = "Export",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
+                        } else {
+                            // Left "Add pages" Action Button Inside the Dock[cite: 1]
+                            Button(
+                                onClick = onAddPagesClick,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary
+                                ),
+                                shape = RoundedCornerShape(24.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(52.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Add,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = "Add pages",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
+
+                            // Right "Export" Action Button Inside the Dock[cite: 1]
+                            Button(
+                                onClick = onExportClick,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                                ),
+                                shape = RoundedCornerShape(24.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(52.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Share,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = "Export",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    ) { innerPadding ->
         // Main Scanned Pages Document Grid Layout View[cite: 1]
         LazyVerticalGrid(
             columns = GridCells.Fixed(GRID_COLUMNS),
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background),
             contentPadding = PaddingValues(
-                top = headerHeightDp + 16.dp,
-                bottom = footerHeightDp + 24.dp,
+                top = innerPadding.calculateTopPadding() + 16.dp,
+                bottom = innerPadding.calculateBottomPadding() + 24.dp,
                 start = 12.dp,
                 end = 12.dp
             ),
@@ -161,21 +397,34 @@ fun DocumentDetailScreen(
                         .clip(RoundedCornerShape(16.dp))
                         .background(MaterialTheme.colorScheme.surfaceContainerLow)
                         .pointerInput(page.pageId, orderedPages.size) {
+                            // A long press either (a) selects the page, if the
+                            // finger never moves, or (b) drags/reorders it, if
+                            // it does — so one gesture drives both features
+                            // without them fighting each other.
+                            var moved = false
                             detectDragGesturesAfterLongPress(
                                 onDragStart = {
-                                    draggingPageId = page.pageId
+                                    moved = false
                                     dragOffset = Offset.Zero
+                                    draggingPageId = page.pageId
                                 },
                                 onDragEnd = {
                                     draggingPageId = null
                                     dragOffset = Offset.Zero
-                                    onReorder(orderedPages.map { it.pageId })
+                                    if (moved) {
+                                        onReorder(orderedPages.map { it.pageId })
+                                    } else if (selectedPageIds.isNotEmpty()) {
+                                        togglePageSelection(page)
+                                    } else {
+                                        selectedPageIds = setOf(page.pageId)
+                                    }
                                 },
                                 onDragCancel = {
                                     draggingPageId = null
                                     dragOffset = Offset.Zero
                                 },
                                 onDrag = { change, delta ->
+                                    moved = true
                                     change.consume()
                                     dragOffset += delta
 
@@ -205,7 +454,7 @@ fun DocumentDetailScreen(
                             )
                         }
                         .clickable {
-                            if (isSelecting) togglePageSelection(page) else onPageClick(page)
+                            if (selectedPageIds.isNotEmpty()) togglePageSelection(page) else onPageClick(page)
                         }
                 ) {
                     Image(
@@ -257,246 +506,6 @@ fun DocumentDetailScreen(
                                 contentDescription = if (isSelecting) "Select page" else "Delete page",
                                 tint = Color.White,
                                 modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // 1. Liquid Glass Top Navigation Bar Configuration Overlay[cite: 1]
-        Surface(
-            color = Color.Transparent,
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.TopStart)
-                .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .onGloballyPositioned { headerHeightPx = it.size.height }
-        ) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
-                shape = RoundedCornerShape(24.dp),
-                tonalElevation = 6.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = {
-                            if (isSelecting) selectedPageIds = emptySet() else onBackClick()
-                        }
-                    ) {
-                        Icon(
-                            imageVector = if (isSelecting) Icons.Filled.Close else Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = if (isSelecting) "Cancel selection" else "Back",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = if (isSelecting) "${selectedPageIds.size} selected" else title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (!isSelecting) {
-                        IconButton(onClick = { showRenameDialog = true }) {
-                            Icon(
-                                imageVector = Icons.Filled.Edit,
-                                contentDescription = "Rename",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Box {
-                            IconButton(onClick = { showOverflowMenu = true }) {
-                                Icon(
-                                    imageVector = Icons.Filled.MoreVert,
-                                    contentDescription = "Options",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            DropdownMenu(
-                                expanded = showOverflowMenu,
-                                onDismissRequest = { showOverflowMenu = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("Share as PDF") },
-                                    leadingIcon = {
-                                        Icon(Icons.Filled.Share, contentDescription = null)
-                                    },
-                                    onClick = {
-                                        showOverflowMenu = false
-                                        onShare(OutputFormat.PDF)
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Share as JPEG") },
-                                    leadingIcon = {
-                                        Icon(Icons.Filled.Share, contentDescription = null)
-                                    },
-                                    onClick = {
-                                        showOverflowMenu = false
-                                        onShare(OutputFormat.JPEG)
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Share as PNG") },
-                                    leadingIcon = {
-                                        Icon(Icons.Filled.Share, contentDescription = null)
-                                    },
-                                    onClick = {
-                                        showOverflowMenu = false
-                                        onShare(OutputFormat.PNG)
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Delete document") },
-                                    leadingIcon = {
-                                        Icon(Icons.Filled.Delete, contentDescription = null)
-                                    },
-                                    onClick = {
-                                        showOverflowMenu = false
-                                        showDeleteConfirm = true
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. Liquid Glass Unified Bottom Actions Bar Menu Overlay Dock[cite: 1]
-        Surface(
-            color = Color.Transparent,
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 16.dp)
-                .onGloballyPositioned { footerHeightPx = it.size.height }
-        ) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
-                shape = RoundedCornerShape(32.dp),
-                tonalElevation = 8.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    if (isSelecting) {
-                        val selectedPages = orderedPages.filter { selectedPageIds.contains(it.pageId) }
-
-                        // "Edit selected" Action Button Inside the Dock
-                        Button(
-                            onClick = { onEditSelected(selectedPages) },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer
-                            ),
-                            shape = RoundedCornerShape(24.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(52.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Edit,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = "Edit",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-
-                        // "Export selected" Action Button Inside the Dock
-                        Button(
-                            onClick = { onExportSelected(selectedPages) },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary
-                            ),
-                            shape = RoundedCornerShape(24.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(52.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Share,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimary
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = "Export",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
-                    } else {
-                        // Left "Add pages" Action Button Inside the Dock[cite: 1]
-                        Button(
-                            onClick = onAddPagesClick,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary
-                            ),
-                            shape = RoundedCornerShape(24.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(52.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Add,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimary
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = "Add pages",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
-
-                        // Right "Export" Action Button Inside the Dock[cite: 1]
-                        Button(
-                            onClick = onExportClick,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer
-                            ),
-                            shape = RoundedCornerShape(24.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(52.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Share,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = "Export",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         }
                     }
