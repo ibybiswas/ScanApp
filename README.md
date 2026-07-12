@@ -193,34 +193,4 @@ ScanApp/
   recent** backup — there's no version history, so restoring always gets you
   the last backup you made with that method.
 
-## Adding screenshots to this README
 
-The simplest way, no git command line needed:
-
-1. Open this `README.md` file on GitHub and click the pencil (✏️) icon to
-   edit it.
-2. Drag your screenshot image directly into the edit box (or click inside
-   the text box and use **Paste**, or use the small image icon in the
-   toolbar above the box to browse for a file).
-3. GitHub uploads the image and automatically inserts a line like:
-   ```markdown
-   ![image](https://github.com/user-attachments/assets/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
-   ```
-   at your cursor position. Move that line wherever you want the image to
-   show up in the file.
-4. Commit the change directly to `main`, same as any other edit.
-
-A couple of tips:
-- You can drag in multiple images at once; each gets its own auto-generated
-  line.
-- To control the display size (GitHub's auto-inserted `![image](...)` shows
-  it full width), you can instead write raw HTML:
-  ```html
-  <img src="https://github.com/user-attachments/assets/xxxx..." width="300">
-  ```
-- If you'd rather commit the actual image file into the repo (e.g. into a
-  new `screenshots/` folder) instead of relying on GitHub's attachment CDN,
-  upload it via **"Add file" → "Upload files"** like any other file, then
-  reference it with a relative path: `![Home screen](screenshots/home.png)`.
-  This keeps the image tied to the repo itself rather than a separate
-  attachments URL.
