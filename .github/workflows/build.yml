@@ -18,36 +18,50 @@ jobs:
 
       - name: Bump app version
         id: bump_version
-        # Auto-bumps the human-facing versionName on every release dispatch,
-        # so nobody has to remember to hand-edit app/build.gradle.kts first.
+        # Auto-bumps the human-facing versionName, but ONLY if it wasn't
+        # already bumped by hand before triggering this workflow.
+        # Detection: compare the version currently in build.gradle.kts
+        # against the version of the latest release tag. If they're the
+        # same, nobody touched it since the last release, so auto-bump.
+        # If they differ, someone already edited appVersionName manually
+        # before running this workflow, so we respect that value as-is.
         # Rolls PATCH 0→9, then MINOR bumps and PATCH resets to 0:
         #   1.1.0 → 1.1.1 → … → 1.1.9 → 1.2.0 → 1.2.1 → …
         # MAJOR is never touched automatically — bump it by hand in
         # build.gradle.kts when you actually want a major version change.
-        # This step's commit becomes the new source of truth for
-        # appVersionName from here on (both for this build and every one
-        # after it).
+        # This step's commit (or the pre-existing manual commit) becomes
+        # the new source of truth for appVersionName from here on (both
+        # for this build and every one after it).
         run: |
           CURRENT=$(grep -oP 'val appVersionName = "\K[^"]+' app/build.gradle.kts)
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
 
-          if [ "$PATCH" -ge 9 ]; then
-            PATCH=0
-            MINOR=$((MINOR + 1))
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          PREV_VERSION="${PREV_TAG#v}"
+
+          if [ -n "$PREV_VERSION" ] && [ "$CURRENT" != "$PREV_VERSION" ]; then
+            echo "Version already bumped manually: ${PREV_VERSION} -> ${CURRENT}. Skipping auto-bump."
+            NEW_VERSION="$CURRENT"
           else
-            PATCH=$((PATCH + 1))
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+            if [ "$PATCH" -ge 9 ]; then
+              PATCH=0
+              MINOR=$((MINOR + 1))
+            else
+              PATCH=$((PATCH + 1))
+            fi
+
+            NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+            echo "Bumping version: $CURRENT -> $NEW_VERSION"
+
+            sed -i "s/val appVersionName = \"${CURRENT}\"/val appVersionName = \"${NEW_VERSION}\"/" app/build.gradle.kts
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add app/build.gradle.kts
+            git commit -m "chore: bump version to ${NEW_VERSION} [skip ci]"
+            git push origin HEAD:"${GITHUB_REF_NAME}"
           fi
-
-          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-          echo "Bumping version: $CURRENT -> $NEW_VERSION"
-
-          sed -i "s/val appVersionName = \"${CURRENT}\"/val appVersionName = \"${NEW_VERSION}\"/" app/build.gradle.kts
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/build.gradle.kts
-          git commit -m "chore: bump version to ${NEW_VERSION} [skip ci]"
-          git push origin HEAD:"${GITHUB_REF_NAME}"
 
           echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
