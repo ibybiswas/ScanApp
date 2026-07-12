@@ -97,7 +97,8 @@ fun BackupScreen(
     telegramActivity: TelegramActivityState = TelegramActivityState.NONE,
     onHomeClick: () -> Unit = {},
     onToolsClick: () -> Unit = {},
-    onSettingsClick: () -> Unit = {}
+    onSettingsClick: () -> Unit = {},
+    navBarGlassOpacity: Float = NavBarPreferences.DEFAULT_GLASS_OPACITY
 ) {
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
@@ -379,6 +380,7 @@ fun BackupScreen(
                 onToolsClick = onToolsClick,
                 onSettingsClick = onSettingsClick,
                 onBackupClick = {},
+                glassOpacity = navBarGlassOpacity,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .onGloballyPositioned { navBarHeightPx = it.size.height }
