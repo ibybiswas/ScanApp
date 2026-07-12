@@ -5,7 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Reorder
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -60,24 +62,28 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.util.fastAny
-import androidx.compose.ui.util.fastFirstOrNull
 import androidx.compose.ui.zIndex
 import coil.compose.rememberAsyncImagePainter
 import com.example.scanapp.export.OutputFormat
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
 
 private const val GRID_COLUMNS = 2
+
+// Used to distinguish "the long-press timeout genuinely elapsed" from
+// "waitForUpOrCancellation() returned null because something else (like
+// grid scrolling) claimed the gesture" — both would otherwise collapse to
+// a bare null and be indistinguishable.
+private sealed class RaceResult {
+    data object TimedOut : RaceResult()
+    data class Released(val change: androidx.compose.ui.input.pointer.PointerInputChange?) : RaceResult()
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -102,6 +108,7 @@ fun DocumentDetailScreen(
 
     var selectedPageIds by remember { mutableStateOf(emptySet<Long>()) }
     val isSelecting = selectedPageIds.isNotEmpty()
+    var isReordering by remember { mutableStateOf(false) }
 
     var showRenameDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -150,18 +157,26 @@ fun DocumentDetailScreen(
                     ) {
                         IconButton(
                             onClick = {
-                                if (isSelecting) selectedPageIds = emptySet() else onBackClick()
+                                when {
+                                    isSelecting -> selectedPageIds = emptySet()
+                                    isReordering -> isReordering = false
+                                    else -> onBackClick()
+                                }
                             }
                         ) {
                             Icon(
-                                imageVector = if (isSelecting) Icons.Filled.Close else Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = if (isSelecting) "Cancel selection" else "Back",
+                                imageVector = if (isSelecting || isReordering) Icons.Filled.Close else Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = if (isSelecting || isReordering) "Cancel" else "Back",
                                 tint = MaterialTheme.colorScheme.onSurface
                             )
                         }
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            text = if (isSelecting) "${selectedPageIds.size} selected" else title,
+                            text = when {
+                                isSelecting -> "${selectedPageIds.size} selected"
+                                isReordering -> "Reordering"
+                                else -> title
+                            },
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface,
@@ -169,7 +184,22 @@ fun DocumentDetailScreen(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
                         )
-                        if (!isSelecting) {
+                        if (isReordering) {
+                            IconButton(onClick = { isReordering = false }) {
+                                Icon(
+                                    imageVector = Icons.Filled.Check,
+                                    contentDescription = "Done reordering",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        } else if (!isSelecting) {
+                            IconButton(onClick = { isReordering = true }) {
+                                Icon(
+                                    imageVector = Icons.Filled.Reorder,
+                                    contentDescription = "Reorder pages",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                             IconButton(onClick = { showRenameDialog = true }) {
                                 Icon(
                                     imageVector = Icons.Filled.Edit,
@@ -258,7 +288,14 @@ fun DocumentDetailScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        if (isSelecting) {
+                        if (isReordering) {
+                            Text(
+                                text = "Drag a page to reorder it, then tap Done",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 14.dp)
+                            )
+                        } else if (isSelecting) {
                             val selectedPages = orderedPages.filter { selectedPageIds.contains(it.pageId) }
 
                             // "Edit selected" Action Button Inside the Dock
@@ -404,95 +441,98 @@ fun DocumentDetailScreen(
                         .zIndex(if (isDragging) 1f else 0f)
                         .clip(RoundedCornerShape(16.dp))
                         .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                        .pointerInput(page.pageId, orderedPages.size) {
-                            // A single gesture recognizer drives taps, long-press-to-select,
-                            // and long-press-to-drag together, so they can't double-fire on
-                            // the same touch stream the way two independent detectors
-                            // (pointerInput + clickable) used to.
-                            //
-                            // The long press itself is detected with a manual event loop
-                            // wrapped in withTimeout — the same technique Compose's own
-                            // detectDragGesturesAfterLongPress uses internally — rather than
-                            // delegating to waitForUpOrCancellation() from inside a
-                            // withTimeoutOrNull. That combination left drag() unable to see
-                            // any further pointer movement once the timeout fired.
-                            awaitEachGesture {
-                                val down = awaitFirstDown(requireUnconsumed = false)
+                        .pointerInput(page.pageId, orderedPages.size, isReordering) {
+                            if (isReordering) {
+                                // Dedicated reorder mode: dragging starts on ordinary touch
+                                // slop, no long-press needed, since entering this mode via
+                                // the header icon is already an explicit opt-in. No tap or
+                                // select handling runs here at all, so there's nothing left
+                                // to race against.
+                                detectDragGestures(
+                                    onDragStart = {
+                                        dragOffset = Offset.Zero
+                                        draggingPageId = page.pageId
+                                    },
+                                    onDragEnd = {
+                                        draggingPageId = null
+                                        dragOffset = Offset.Zero
+                                        onReorder(orderedPages.map { it.pageId })
+                                    },
+                                    onDragCancel = {
+                                        draggingPageId = null
+                                        dragOffset = Offset.Zero
+                                    },
+                                    onDrag = { change, delta ->
+                                        change.consume()
+                                        dragOffset += delta
 
-                                var longPressed = false
-                                try {
-                                    withTimeout(viewConfiguration.longPressTimeoutMillis) {
-                                        while (true) {
-                                            val event = awaitPointerEvent(PointerEventPass.Main)
-                                            val change = event.changes.fastFirstOrNull { it.id == down.id }
-                                            if (change == null || !change.pressed) {
-                                                // Released before the timeout: a plain tap.
-                                                return@withTimeout
-                                            }
-                                            if (event.changes.fastAny { it.isConsumed }) {
-                                                // Claimed by something else, e.g. the grid
-                                                // started scrolling — back off entirely.
-                                                return@withTimeout
-                                            }
-                                        }
-                                    }
-                                } catch (timeout: PointerEventTimeoutCancellationException) {
-                                    longPressed = true
-                                }
-
-                                if (!longPressed) {
-                                    if (selectedPageIds.isNotEmpty()) {
-                                        togglePageSelection(page)
-                                    } else {
-                                        onPageClick(page)
-                                    }
-                                    return@awaitEachGesture
-                                }
-
-                                // Long press recognized and finger is still down. Enter drag
-                                // tracking; if it never actually moves, treat the eventual
-                                // release as a selection toggle instead.
-                                var moved = false
-                                dragOffset = Offset.Zero
-                                draggingPageId = page.pageId
-
-                                drag(down.id) { change ->
-                                    moved = true
-                                    change.consume()
-                                    dragOffset += change.positionChange()
-
-                                    if (cellWidthPx > 0 && cellHeightPx > 0) {
-                                        val colShift = (dragOffset.x / cellWidthPx).roundToInt()
-                                        val rowShift = (dragOffset.y / cellHeightPx).roundToInt()
-                                        val shift = rowShift * GRID_COLUMNS + colShift
-                                        if (shift != 0) {
-                                            val fromIndex = orderedPages.indexOfFirst { it.pageId == page.pageId }
-                                            val toIndex = (fromIndex + shift).coerceIn(0, orderedPages.lastIndex)
-                                            if (toIndex != fromIndex) {
-                                                orderedPages = orderedPages.toMutableList().apply {
-                                                    add(toIndex, removeAt(fromIndex))
+                                        if (cellWidthPx > 0 && cellHeightPx > 0) {
+                                            val colShift = (dragOffset.x / cellWidthPx).roundToInt()
+                                            val rowShift = (dragOffset.y / cellHeightPx).roundToInt()
+                                            val shift = rowShift * GRID_COLUMNS + colShift
+                                            if (shift != 0) {
+                                                val fromIndex = orderedPages.indexOfFirst { it.pageId == page.pageId }
+                                                val toIndex = (fromIndex + shift).coerceIn(0, orderedPages.lastIndex)
+                                                if (toIndex != fromIndex) {
+                                                    orderedPages = orderedPages.toMutableList().apply {
+                                                        add(toIndex, removeAt(fromIndex))
+                                                    }
+                                                    // Compensate for the distance the swap just covered so
+                                                    // the drag keeps tracking the finger smoothly instead of
+                                                    // jumping.
+                                                    val consumedShift = toIndex - fromIndex
+                                                    dragOffset -= Offset(
+                                                        x = (consumedShift % GRID_COLUMNS) * cellWidthPx.toFloat(),
+                                                        y = (consumedShift / GRID_COLUMNS) * cellHeightPx.toFloat()
+                                                    )
                                                 }
-                                                // Compensate for the distance the swap just covered so
-                                                // the drag keeps tracking the finger smoothly instead of
-                                                // jumping.
-                                                val consumedShift = toIndex - fromIndex
-                                                dragOffset -= Offset(
-                                                    x = (consumedShift % GRID_COLUMNS) * cellWidthPx.toFloat(),
-                                                    y = (consumedShift / GRID_COLUMNS) * cellHeightPx.toFloat()
-                                                )
                                             }
                                         }
                                     }
-                                }
+                                )
+                            } else {
+                                // Normal browsing mode: tap to open/toggle, long press to
+                                // select. No dragging happens here at all anymore, so there's
+                                // nothing racing the selection logic.
+                                awaitEachGesture {
+                                    val down = awaitFirstDown()
 
-                                draggingPageId = null
-                                dragOffset = Offset.Zero
-                                if (moved) {
-                                    onReorder(orderedPages.map { it.pageId })
-                                } else if (selectedPageIds.isNotEmpty()) {
-                                    togglePageSelection(page)
-                                } else {
-                                    selectedPageIds = setOf(page.pageId)
+                                    // Race the long-press timeout against the finger lifting
+                                    // or the gesture being claimed by something else (e.g. the
+                                    // grid's own scrolling). withTimeoutOrNull's "null" and
+                                    // waitForUpOrCancellation's "null" both collapse to null if
+                                    // handled naively, so they're wrapped to stay distinguishable:
+                                    // TimedOut = long press recognized; Released(null) = someone
+                                    // else (scroll) claimed the gesture, so we back off entirely.
+                                    val raceResult = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                                        RaceResult.Released(waitForUpOrCancellation())
+                                    } ?: RaceResult.TimedOut
+
+                                    when (raceResult) {
+                                        is RaceResult.Released -> {
+                                            val upChange = raceResult.change
+                                            if (upChange != null) {
+                                                // Released quickly, no movement: a plain tap.
+                                                if (selectedPageIds.isNotEmpty()) {
+                                                    togglePageSelection(page)
+                                                } else {
+                                                    onPageClick(page)
+                                                }
+                                            }
+                                            // upChange == null means the gesture was claimed by
+                                            // something else (e.g. the grid started scrolling) —
+                                            // nothing to do, let it go.
+                                        }
+                                        RaceResult.TimedOut -> {
+                                            // Long press recognized: select regardless of
+                                            // whether the finger later moves or lifts.
+                                            if (selectedPageIds.isNotEmpty()) {
+                                                togglePageSelection(page)
+                                            } else {
+                                                selectedPageIds = setOf(page.pageId)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -524,29 +564,32 @@ fun DocumentDetailScreen(
                     }
 
                     // Top Right Contextual Icon: delete page normally, selection
-                    // checkmark while a multi-select is in progress.
-                    Surface(
-                        color = if (isSelected) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            Color.Black.copy(alpha = 0.5f)
-                        },
-                        shape = CircleShape,
-                        modifier = Modifier
-                            .padding(10.dp)
-                            .size(28.dp)
-                            .align(Alignment.TopEnd)
-                            .clickable {
-                                if (isSelecting) togglePageSelection(page) else onDeletePage(page)
+                    // checkmark while a multi-select is in progress. Hidden while
+                    // reordering so it can't be tapped mid-drag.
+                    if (!isReordering) {
+                        Surface(
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                Color.Black.copy(alpha = 0.5f)
+                            },
+                            shape = CircleShape,
+                            modifier = Modifier
+                                .padding(10.dp)
+                                .size(28.dp)
+                                .align(Alignment.TopEnd)
+                                .clickable {
+                                    if (isSelecting) togglePageSelection(page) else onDeletePage(page)
+                                }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (isSelecting) Icons.Filled.Check else Icons.Filled.Close,
+                                    contentDescription = if (isSelecting) "Select page" else "Delete page",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
                             }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (isSelecting) Icons.Filled.Check else Icons.Filled.Close,
-                                contentDescription = if (isSelecting) "Select page" else "Delete page",
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
                         }
                     }
                 }
