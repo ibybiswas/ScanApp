@@ -23,19 +23,14 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.NewReleases
-import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -83,24 +78,7 @@ fun SettingsScreen(
         // See HomeScreen: stop Scaffold from painting an opaque
         // system-bar-height strip behind the floating bottom nav pill.
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            TopAppBar(
-                title = { Text("Settings") },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    // Settings gear — this screen IS the settings screen; kept as
-                    // a visible icon since more settings (theme, default export
-                    // format, etc.) will likely be added here later.
-                    IconButton(onClick = { /* already on the settings screen */ }) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
-                    }
-                }
-            )
-        }
+        topBar = { SettingsTopBar(onBackClick = onBackClick) }
     ) { padding ->
         Box(
             modifier = Modifier
@@ -111,7 +89,7 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp + navBarHeightDp)
+                .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp + navBarHeightDp)
         ) {
             SectionLabel("General")
             Spacer(Modifier.height(4.dp))
@@ -279,36 +257,64 @@ fun SettingsScreen(
 }
 
 /**
- * Slider row controlling how see-through the liquid glass bottom nav is.
- * Lives in its own [ListItem]-style row so it lines up visually with the
- * switches above it, with a live percentage readout and a mini preview
- * pill that mirrors the same background treatment as [ScanAppBottomNav]
- * so the effect is visible without leaving the Settings screen.
+ * Compact liquid-glass header: back arrow, title, and the settings gear in
+ * a single tight row, with a flat translucent glass background that
+ * extends up under the status bar (rather than the taller default
+ * Material3 TopAppBar, which pads more generously around its content).
+ */
+@Composable
+private fun SettingsTopBar(onBackClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .cleanGlassBackground(
+                tint = MaterialTheme.colorScheme.surfaceContainer,
+                opacity = HEADER_GLASS_OPACITY
+            )
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .height(48.dp)
+                .padding(horizontal = 4.dp)
+        ) {
+            IconButton(onClick = onBackClick) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            }
+            Text(
+                "Settings",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
+            )
+            // Settings gear — this screen IS the settings screen; kept as a
+            // visible icon since more settings sections will likely be
+            // added here later.
+            IconButton(onClick = { /* already on the settings screen */ }) {
+                Icon(Icons.Filled.Settings, contentDescription = "Settings")
+            }
+        }
+    }
+}
+
+/** Opacity of the Settings header's glass background — fixed, not user-tunable (only the bottom nav's opacity is). */
+private const val HEADER_GLASS_OPACITY = 0.6f
+
+/**
+ * Compact slider row controlling how see-through the liquid glass bottom
+ * nav is: just the label above, and the slider with its live percentage
+ * readout directly to its right below.
  */
 @Composable
 private fun NavBarGlassOpacityRow(
     opacity: Float,
     onOpacityChange: (Float) -> Unit
 ) {
-    Column(modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)) {
-        ListItem(
-            headlineContent = { Text("Bottom Navbar Glass Opacity") },
-            supportingContent = { Text("How see-through the liquid glass bottom bar looks") },
-            leadingContent = {
-                Icon(Icons.Filled.Opacity, contentDescription = null)
-            },
-            trailingContent = {
-                Text(
-                    "${(opacity * 100).toInt()}%",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelLarge
-                )
-            }
-        )
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        ) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Text("Bottom Navbar Glass Opacity", style = MaterialTheme.typography.bodyLarge)
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Slider(
                 value = opacity,
                 onValueChange = onOpacityChange,
@@ -316,33 +322,14 @@ private fun NavBarGlassOpacityRow(
                 modifier = Modifier.weight(1f)
             )
             Spacer(Modifier.width(12.dp))
-            // Small live preview so the "liquid glass" look is visible
-            // right here, using the same base tint the real nav bar uses.
-            Box(
-                modifier = Modifier
-                    .size(width = 44.dp, height = 28.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .drawWithBackground(
-                        baseColor = MaterialTheme.colorScheme.surfaceContainer,
-                        opacity = opacity
-                    )
+            Text(
+                "${(opacity * 100).toInt()}%",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.widthIn(min = 36.dp)
             )
         }
     }
-}
-
-/** Draws the same translucent base + top sheen used by [ScanAppBottomNav], for the mini preview swatch. */
-private fun Modifier.drawWithBackground(baseColor: Color, opacity: Float): Modifier = this.drawBehind {
-    drawRect(baseColor.copy(alpha = opacity))
-    drawRect(
-        brush = Brush.verticalGradient(
-            colors = listOf(
-                Color.White.copy(alpha = 0.24f * opacity),
-                Color.Transparent
-            ),
-            endY = size.height * 0.8f
-        )
-    )
 }
 
 @Composable
@@ -631,40 +618,62 @@ private val GoldColor = Color(0xFFCC9A06)
 /** Darker gold used for the extruded "depth" layers behind the front face. */
 private val GoldShadeDark = Color(0xFF7A5C04)
 
-/** Developer contact rows: Telegram (inline link) and GitHub profile (inline link). */
+/** Developer contact rows: Telegram and GitHub, side by side to keep the Developer section compact. */
 @Composable
 private fun DeveloperInfoSection() {
     val uriHandler = LocalUriHandler.current
 
-    ListItem(
-        headlineContent = { Text("Telegram") },
-        supportingContent = { Text("t.me/ibyb007", color = MaterialTheme.colorScheme.primary) },
-        leadingContent = { TelegramIcon() },
-        trailingContent = {
-            Icon(
-                Icons.AutoMirrored.Filled.OpenInNew,
-                contentDescription = "Open Telegram",
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        },
-        modifier = Modifier.clickable { uriHandler.openUri("https://t.me/ibyb007") }
-    )
+    Row(modifier = Modifier.fillMaxWidth()) {
+        DeveloperContactCard(
+            icon = { TelegramIcon() },
+            name = "Telegram",
+            handle = "t.me/ibyb007",
+            onClick = { uriHandler.openUri("https://t.me/ibyb007") },
+            modifier = Modifier.weight(1f)
+        )
+        DeveloperContactCard(
+            icon = { GitHubIcon() },
+            name = "GitHub",
+            handle = "@ibyb007",
+            onClick = { uriHandler.openUri("https://github.com/ibyb007") },
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
 
-    ListItem(
-        headlineContent = { Text("GitHub") },
-        supportingContent = { Text("@ibyb007", color = MaterialTheme.colorScheme.primary) },
-        leadingContent = { GitHubIcon() },
-        trailingContent = {
-            Icon(
-                Icons.AutoMirrored.Filled.OpenInNew,
-                contentDescription = "Open GitHub profile",
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
+/** One half of the side-by-side Developer row: icon, name, handle, and an "open" glyph, all left-aligned and compact. */
+@Composable
+private fun DeveloperContactCard(
+    icon: @Composable () -> Unit,
+    name: String,
+    handle: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp, horizontal = 4.dp)
+    ) {
+        icon()
+        Spacer(Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(
+                handle,
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1
             )
-        },
-        modifier = Modifier.clickable { uriHandler.openUri("https://github.com/ibyb007") }
-    )
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.OpenInNew,
+            contentDescription = "Open $name",
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }
 
 /**

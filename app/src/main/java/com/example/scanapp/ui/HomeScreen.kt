@@ -14,7 +14,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
@@ -39,11 +38,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -708,11 +704,9 @@ private fun EmptyRecentsState(modifier: Modifier = Modifier, isSearching: Boolea
 
 /**
  * The floating bottom nav, shared by every top-level screen (Home, Collage,
- * Backup, Settings). Rendered as "liquid glass": a translucent, tinted pill
- * with a bright top sheen, a soft diagonal highlight streak, a light rim
- * border, and a small blurred shine blob near the top-left corner — the
- * combination reads as a curved glass surface catching light rather than a
- * flat painted bar. [glassOpacity] (0 = almost see-through, 1 = fully
+ * Backup, Settings). Rendered as clean "liquid glass": a flat translucent
+ * tinted pill with a subtle outline, no sheens/highlights/blur — just a
+ * simple frosted look. [glassOpacity] (0 = almost see-through, 1 = fully
  * opaque) is user-controlled from the Settings screen and persisted via
  * [NavBarPreferences].
  */
@@ -734,11 +728,6 @@ internal fun ScanAppBottomNav(
     )
 
     val shape = RoundedCornerShape(28.dp)
-    val glassTint = MaterialTheme.colorScheme.surfaceContainer
-    val opacity = glassOpacity.coerceIn(
-        NavBarPreferences.MIN_GLASS_OPACITY,
-        NavBarPreferences.MAX_GLASS_OPACITY
-    )
 
     Box(
         modifier = modifier
@@ -747,58 +736,16 @@ internal fun ScanAppBottomNav(
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .height(68.dp)
             .clip(shape)
-            // Base glass fill plus two light sheens — a broad one from the
-            // top edge and a narrower diagonal streak — so the tint reads
-            // as light passing through curved glass rather than a flat
-            // translucent rectangle.
-            .drawBehind {
-                drawRect(glassTint.copy(alpha = opacity))
-                drawRect(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.24f * opacity),
-                            Color.Transparent
-                        ),
-                        endY = size.height * 0.8f
-                    )
-                )
-                drawRect(
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            Color.White.copy(alpha = 0.16f * opacity),
-                            Color.Transparent
-                        ),
-                        start = Offset(0f, size.height),
-                        end = Offset(size.width * 0.65f, 0f)
-                    )
-                )
-            }
+            .cleanGlassBackground(
+                tint = MaterialTheme.colorScheme.surfaceContainer,
+                opacity = glassOpacity
+            )
             .border(
                 width = 1.dp,
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.55f),
-                        Color.White.copy(alpha = 0.06f)
-                    )
-                ),
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
                 shape = shape
             )
     ) {
-        // Small soft shine near the top-left corner, like a highlight
-        // curving across a glass bead. Modifier.blur only takes effect on
-        // API 31+ (RenderEffect); below that it degrades gracefully to a
-        // plain soft-edged translucent patch, which still reads as a
-        // highlight, so no version check is needed here.
-        Box(
-            modifier = Modifier
-                .size(width = 96.dp, height = 34.dp)
-                .align(Alignment.TopStart)
-                .offset(x = 4.dp, y = (-10).dp)
-                .blur(28.dp)
-                .background(Color.White.copy(alpha = 0.32f * opacity), CircleShape)
-        )
-
         NavigationBar(
             containerColor = Color.Transparent,
             tonalElevation = 0.dp,
@@ -829,6 +776,22 @@ internal fun ScanAppBottomNav(
             }
         }
     }
+}
+
+/**
+ * Flat translucent tint used for every "liquid glass" surface in the app
+ * (the bottom nav, the Settings header): just the theme's container color
+ * at a caller-chosen alpha. Deliberately plain — no gradients, sheens, or
+ * blurred highlight blobs — for a clean frosted look rather than a
+ * reflective one. [opacity] is clamped to [NavBarPreferences]'s allowed
+ * range so callers can pass a raw slider value straight through.
+ */
+internal fun Modifier.cleanGlassBackground(tint: Color, opacity: Float): Modifier {
+    val clamped = opacity.coerceIn(
+        NavBarPreferences.MIN_GLASS_OPACITY,
+        NavBarPreferences.MAX_GLASS_OPACITY
+    )
+    return this.background(tint.copy(alpha = clamped))
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
