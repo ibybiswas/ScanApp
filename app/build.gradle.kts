@@ -132,8 +132,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
 
     // ML Kit Document Scanner (the Google Drive-style scan UI)
-    implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0-beta1")
-
+    implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
     // Google Identity Services' AuthorizationClient — used to obtain a
     // short-lived Drive access token for the Google Drive backup/restore
     // feature (see MainActivity's withGoogleDriveAuthorization and
